@@ -18,7 +18,7 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
     logger.info(f"Starting Digital Twin Backend Server on http://{host}:{port}")
     uvicorn.run("backend.api:app", host=host, port=port, reload=False)
 
-def run_cli_simulation(mission_id: int = 1, steps: int = 10):
+def run_cli_simulation(mission_id: int = 1, steps: int = 30):
     """Runs a headless simulation step demo printing state outputs."""
     logger.info(f"Running Headless Simulation Demo for Mission {mission_id} ({steps} steps)...")
     engine = MissionSimulationEngine()
@@ -34,13 +34,19 @@ def run_cli_simulation(mission_id: int = 1, steps: int = 10):
         if payload is None:
             break
 
+        rul = payload['rul_prediction']
+        if rul.get('status') == "COLLECTING_HISTORY":
+            rul_str = f"COLLECTING_HISTORY ({rul.get('records_available', 0)}/{rul.get('records_required', 13)} ticks)"
+        else:
+            rul_str = f"{rul['predicted_rul_hours']} hrs (P10: {rul['rul_lower_bound_p10']}h – P90: {rul['rul_upper_bound_p90']}h | ±{rul['uncertainty_std_hours']}h | Conf: {rul['confidence_level']})"
+
         print(f"\n--- [TICK #{step_num}] Timestamp: {payload['timestamp_s']}s | Mission: {payload['mission_id']} ---")
         print(f"RPM: {payload['telemetry']['rpm']} | CHT: {payload['telemetry']['cht_C']}°C | EGT: {payload['telemetry']['egt_C']}°C | Oil Press: {payload['telemetry']['oil_pressure_bar']} bar")
         print(f"Physics CHT Residual: {payload['physics_model']['cht_residual']}°C | Physics Residual C: {payload['physics_model']['physics_residual_C']}°C")
         print(f"1. Anomaly Detection Score: {payload['anomaly_detection']['anomaly_score']} (Anomaly: {payload['anomaly_detection']['is_anomaly']})")
         print(f"2. Degradation Health Index: {payload['degradation_estimation']['estimated_health_pct']}% (Degradation: {payload['degradation_estimation']['degradation_index']})")
         print(f"3. Fault Classification: {payload['fault_classification']['predicted_fault']} (Confidence: {payload['fault_classification']['confidence']*100:.1f}%)")
-        print(f"4. Remaining Useful Life (RUL): {payload['rul_prediction']['predicted_rul_hours']} hours")
+        print(f"4. Remaining Useful Life (RUL): {rul_str}")
         print(f"Advisories: {payload['advisories']}")
 
     print("\n" + "="*80)
@@ -59,7 +65,7 @@ def main():
     # Run CLI command
     run_parser = subparsers.add_parser("run", help="Run headless simulation replay demo in terminal")
     run_parser.add_argument("--mission", type=int, default=1, help="Mission ID to simulate")
-    run_parser.add_argument("--steps", type=int, default=10, help="Number of telemetry steps to simulate")
+    run_parser.add_argument("--steps", type=int, default=30, help="Number of telemetry steps to simulate")
 
     args = parser.parse_args()
 

@@ -18,7 +18,7 @@ class MissionSimulationEngine:
     1. Historical flight telemetry streaming & mission replay.
     2. Dynamic parameter overrides & synthetic fault injection.
     3. Unified 4-Model real-time AI/ML inference execution.
-    4. Mission health monitoring & advisory generation.
+    4. Mission health monitoring & advisory generation with alert level state tracking (anti-spam).
     """
 
     def __init__(self, dataset_path: str = str(DATASET_100K_PATH)):
@@ -32,6 +32,9 @@ class MissionSimulationEngine:
         self.state: str = "STOPPED"  # STOPPED, RUNNING, PAUSED
         self.speed: float = 1.0       # Replay speed multiplier
         self.anomaly_threshold: float = 0.0
+
+        # Alert State Tracking per Mission (Anti-Spam)
+        self.last_alert_levels: Dict[str, Any] = {}
 
         # Model Manager & Feature Engine
         self.model_manager = DigitalTwinModelManager()
@@ -77,8 +80,10 @@ class MissionSimulationEngine:
         self.mission_df = filtered.sort_values("timestamp_s").reset_index(drop=True)
         self.current_frame_idx = 0
         self.feature_engine.reset()
+        self.model_manager.reset_state()
+        self.last_alert_levels = {}
         self.state = "PAUSED"
-        logger.info(f"Loaded Mission {mission_id} ({len(self.mission_df)} frames).")
+        logger.info(f"Loaded Mission {mission_id} ({len(self.mission_df)} frames). Alert levels reset.")
 
     def set_state(self, state: str):
         """Sets simulation playback state (RUNNING, PAUSED, STOPPED)."""
@@ -133,11 +138,25 @@ class MissionSimulationEngine:
 
         # Process through feature engine & generate model feature vectors
         fv = self.feature_engine.generate_all_feature_vectors(raw_row, self.model_manager)
+        buffer_len = len(self.feature_engine.buffer)
 
-        # Run inference across all 4 models
-        predictions = self.model_manager.predict_all(fv, anomaly_threshold=self.anomaly_threshold)
+        # Run inference across all 4 models (handles fv["rul"] being None)
+        predictions = self.model_manager.predict_all(
+            fv,
+            anomaly_threshold=self.anomaly_threshold,
+            buffer_len=buffer_len
+        )
 
-        # Generate Maintenance Advisory
+        # Ensure RUL payload has COLLECTING_HISTORY structure if feature vector was None
+        if fv["rul"] is None:
+            predictions["rul_prediction"] = {
+                "status": "COLLECTING_HISTORY",
+                "predicted_rul_hours": None,
+                "records_available": buffer_len,
+                "records_required": 13
+            }
+
+        # Generate Maintenance Advisory with State Tracking (anti-spam)
         advisories = self._generate_maintenance_advisories(predictions, fv["clean_sample"])
 
         # Construct Consolidated Digital Twin Frame Payload
@@ -193,35 +212,89 @@ class MissionSimulationEngine:
         return payload
 
     def _generate_maintenance_advisories(self, predictions: dict, clean_sample: dict) -> List[str]:
+        """
+        Generates maintenance advisories, firing alerts only on state level changes to eliminate tick-by-tick spam.
+        """
         advisories = []
         
         fault = predictions["fault_classification"]["predicted_fault"]
         confidence = predictions["fault_classification"]["confidence"]
-        rul_hours = predictions["rul_prediction"]["predicted_rul_hours"]
+        rul_pred = predictions["rul_prediction"]
+        rul_hours = rul_pred.get("predicted_rul_hours")
         is_anomaly = predictions["anomaly_detection"]["is_anomaly"]
         health_pct = predictions["degradation_estimation"]["estimated_health_pct"]
 
-        if is_anomaly:
-            advisories.append("CRITICAL: Operating parameters deviate significantly from normal baseline envelope.")
+        # 1. ANOMALY Alert State
+        anomaly_state = is_anomaly
+        if anomaly_state != self.last_alert_levels.get("ANOMALY"):
+            if anomaly_state:
+                msg = "CRITICAL: Operating parameters deviate significantly from normal baseline envelope."
+                advisories.append(msg)
+                logger.warning(msg)
+            self.last_alert_levels["ANOMALY"] = anomaly_state
 
-        if fault == "overheating":
-            advisories.append(f"WARNING: Cylinder/Exhaust Overheating trend detected ({confidence*100:.1f}% confidence). Inspect cooling duct & mixture ratio.")
-        elif fault == "lubrication_degradation":
-            advisories.append(f"WARNING: Oil Pressure / Temperature abnormality detected ({confidence*100:.1f}% confidence). Check oil pump and filter.")
-        elif fault == "injector_degradation":
-            advisories.append(f"WARNING: Fuel Injection anomaly detected ({confidence*100:.1f}% confidence). Service fuel injectors.")
-        elif fault == "misfire":
-            advisories.append(f"WARNING: Engine misfire condition detected ({confidence*100:.1f}% confidence). Inspect spark plugs & ignition system.")
-        elif fault == "sensor_fault":
-            advisories.append(f"NOTICE: Sensor telemetry drift detected. Calibrate engine sensors.")
+        # 2. FAULT Alert State
+        fault_state = fault
+        if fault_state != self.last_alert_levels.get("FAULT"):
+            if fault == "overheating":
+                msg = f"WARNING: Cylinder/Exhaust Overheating trend detected ({confidence*100:.1f}% confidence). Inspect cooling duct & mixture ratio."
+                advisories.append(msg)
+                logger.warning(msg)
+            elif fault == "lubrication_degradation":
+                msg = f"WARNING: Oil Pressure / Temperature abnormality detected ({confidence*100:.1f}% confidence). Check oil pump and filter."
+                advisories.append(msg)
+                logger.warning(msg)
+            elif fault == "injector_degradation":
+                msg = f"WARNING: Fuel Injection anomaly detected ({confidence*100:.1f}% confidence). Service fuel injectors."
+                advisories.append(msg)
+                logger.warning(msg)
+            elif fault == "misfire":
+                msg = f"WARNING: Engine misfire condition detected ({confidence*100:.1f}% confidence). Inspect spark plugs & ignition system."
+                advisories.append(msg)
+                logger.warning(msg)
+            elif fault == "sensor_fault":
+                msg = f"NOTICE: Sensor telemetry drift detected. Calibrate engine sensors."
+                advisories.append(msg)
+                logger.info(msg)
+            self.last_alert_levels["FAULT"] = fault_state
 
-        if health_pct < 70.0:
-            advisories.append(f"ALERT: Engine degradation level elevated (Health Index: {health_pct}%). Schedule depot maintenance.")
+        # 3. DEGRADATION Alert State (Bands: NORMAL >= 70%, ELEVATED 50-70%, CRITICAL < 50%)
+        if health_pct < 50.0:
+            deg_state = "CRITICAL"
+        elif health_pct < 70.0:
+            deg_state = "ELEVATED"
+        else:
+            deg_state = "NORMAL"
 
-        if rul_hours < 25.0:
-            advisories.append(f"URGENT: Low RUL remaining ({rul_hours} hours). Plan engine swap before next endurance mission.")
+        if deg_state != self.last_alert_levels.get("DEGRADATION"):
+            if deg_state in ["ELEVATED", "CRITICAL"]:
+                msg = f"ALERT: Engine degradation level elevated (Health Index: {health_pct}%). Schedule depot maintenance."
+                advisories.append(msg)
+                logger.warning(msg)
+            self.last_alert_levels["DEGRADATION"] = deg_state
 
-        if not advisories:
-            advisories.append("NOMINAL: Engine operating within normal parameters. All sub-systems operational.")
+        # 4. RUL LOW Alert State
+        rul_state = "LOW" if (rul_hours is not None and rul_hours < 25.0) else "OK"
+        if rul_state != self.last_alert_levels.get("RUL_LOW"):
+            if rul_state == "LOW":
+                msg = f"URGENT: Low RUL remaining ({rul_hours} hours). Plan engine swap before next endurance mission."
+                advisories.append(msg)
+                logger.warning(msg)
+            self.last_alert_levels["RUL_LOW"] = rul_state
+
+        # Nominal State trigger when no active alert state exists
+        has_active_alerts = any([
+            self.last_alert_levels.get("ANOMALY"),
+            self.last_alert_levels.get("FAULT", "normal") != "normal",
+            self.last_alert_levels.get("DEGRADATION") in ["ELEVATED", "CRITICAL"],
+            self.last_alert_levels.get("RUL_LOW") == "LOW"
+        ])
+
+        if not advisories and not has_active_alerts:
+            if self.last_alert_levels.get("SYSTEM_STATE") != "NOMINAL":
+                advisories.append("NOMINAL: Engine operating within normal parameters. All sub-systems operational.")
+                self.last_alert_levels["SYSTEM_STATE"] = "NOMINAL"
+        elif advisories:
+            self.last_alert_levels["SYSTEM_STATE"] = "ALERT"
 
         return advisories

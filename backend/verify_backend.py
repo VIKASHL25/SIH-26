@@ -35,9 +35,11 @@ def test_digital_twin_backend():
     assert engine.active_mission_id == missions[0], f"Failed to load mission {missions[0]}"
     logger.info(f"TEST PASS 2: Mission {missions[0]} loaded with {len(engine.mission_df)} frames.")
 
-    # 3. Simulate 15 Ticks & Validate All 4 Model Outputs
-    logger.info("Simulating 15 real-time ticks...")
-    for i in range(15):
+    # 3. Simulate 25 Real-Time Ticks & Validate Warm-Up & State Transitions
+    logger.info("Simulating 25 real-time ticks (testing Bug 1 RUL warm-up & Bug 2 anti-spam)...")
+    advisory_history = []
+    
+    for i in range(25):
         payload = engine.step()
         assert payload is not None, f"Frame payload {i} is None!"
 
@@ -49,6 +51,9 @@ def test_digital_twin_backend():
         assert "fault_classification" in payload, "Missing fault_classification!"
         assert "rul_prediction" in payload, "Missing rul_prediction!"
         assert "advisories" in payload, "Missing advisories!"
+
+        advisories = payload["advisories"]
+        advisory_history.append((i + 1, advisories))
 
         # Check Model 1 (Anomaly Detection)
         anom = payload["anomaly_detection"]
@@ -65,11 +70,28 @@ def test_digital_twin_backend():
         assert isinstance(fault["predicted_fault"], str), "Invalid fault label"
         assert 0.0 <= fault["confidence"] <= 1.0, f"Invalid confidence: {fault['confidence']}"
 
-        # Check Model 4 (RUL Prediction)
+        # Check Model 4 (RUL Prediction - Warm-Up vs Real Prediction)
         rul = payload["rul_prediction"]
-        assert rul["predicted_rul_hours"] >= 0.0, f"RUL prediction negative: {rul['predicted_rul_hours']}"
+        if i + 1 < 13:
+            assert rul["status"] == "COLLECTING_HISTORY", f"Expected COLLECTING_HISTORY at tick {i+1}, got {rul['status']}"
+            assert rul["predicted_rul_hours"] is None, f"Expected None RUL at tick {i+1}"
+            assert rul["records_available"] == i + 1
+            assert rul["records_required"] == 13
+        else:
+            assert rul["status"] == "PREDICTED", f"Expected PREDICTED at tick {i+1}, got {rul['status']}"
+            assert rul["predicted_rul_hours"] is not None and rul["predicted_rul_hours"] >= 0.0
+            assert "rul_lower_bound_p10" in rul
+            assert "rul_upper_bound_p90" in rul
+            assert "uncertainty_std_hours" in rul
+            assert "confidence_level" in rul
+            assert rul["rul_lower_bound_p10"] <= rul["predicted_rul_hours"] <= rul["rul_upper_bound_p90"] + 1e-5
 
-    logger.info("TEST PASS 3: 15 ticks executed with clean inference across all 4 models!")
+    logger.info("TEST PASS 3: 25 ticks executed! Ticks 1-12 clean COLLECTING_HISTORY, Ticks 13+ stable numeric RUL & UQ bounds.")
+
+    # Validate Anti-Spam (Bug 2): Check that advisories do not repeat continuously on every tick
+    rul_advisory_count = sum(1 for tick_idx, advs in advisory_history if any("Low RUL remaining" in a for a in advs))
+    assert rul_advisory_count <= 2, f"Expected RUL advisory anti-spam, but fired {rul_advisory_count} times!"
+    logger.info(f"Anti-spam check passed: RUL low advisory fired {rul_advisory_count} times across 25 ticks.")
 
     # 4. Test Fault Injection (Synthetic Overheating)
     logger.info("Injecting synthetic overheating fault (+50°C CHT)...")
@@ -94,7 +116,7 @@ def test_digital_twin_backend():
     logger.info("TEST PASS 5: Simulation playback controls (seek, speed) verified.")
 
     logger.info("=================================================================")
-    logger.info("ALL INTEGRATION TESTS PASSED CLEANLY! DIGITAL TWIN BACKEND READY!")
+    logger.info("ALL INTEGRATION TESTS PASSED CLEANLY! BOTH BUGS FIXED AND VERIFIED!")
     logger.info("=================================================================")
 
 if __name__ == "__main__":

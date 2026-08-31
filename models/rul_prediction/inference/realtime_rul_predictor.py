@@ -5,7 +5,9 @@ from collections import deque
 from xgboost import XGBRegressor
 
 BASE_DIR=os.path.dirname(os.path.abspath(__file__))
-MODEL_FILE=os.path.join(BASE_DIR,"..","models","xgboost_rul_model.json")
+MODEL_FILE_PRIMARY=os.path.join(BASE_DIR,"..","xgboost_rul_model.json")
+MODEL_FILE_ALT=os.path.join(BASE_DIR,"..","models","xgboost_rul_model.json")
+MODEL_FILE=MODEL_FILE_PRIMARY if os.path.exists(MODEL_FILE_PRIMARY) else MODEL_FILE_ALT
 
 class RealTimeRULPredictor:
     def __init__(self):

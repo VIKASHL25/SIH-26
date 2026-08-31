@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from typing import Optional
 from collections import deque
 from backend.config import DEFAULT_SENSOR_DEFAULTS
 
@@ -185,7 +186,11 @@ class DigitalTwinFeatureEngine:
 
         return pd.DataFrame([feature_dict], columns=feature_cols)
 
-    def _generate_rul_features(self, history_df: pd.DataFrame, feature_cols: list) -> pd.DataFrame:
+    def _generate_rul_features(self, history_df: pd.DataFrame, feature_cols: list) -> Optional[pd.DataFrame]:
+        # Return None if history buffer has fewer than 13 records (prevents out-of-distribution RUL estimates)
+        if len(history_df) < 13:
+            return None
+
         df = history_df.copy()
 
         history_features = [
@@ -200,24 +205,34 @@ class DigitalTwinFeatureEngine:
         for feat in history_features:
             if feat in df.columns:
                 for lag in lags:
-                    new_cols[f"{feat}_lag_{lag}"] = df[feat].shift(lag).bfill().fillna(0.0)
+                    new_cols[f"{feat}_lag_{lag}"] = df[feat].shift(lag)
                 for w in windows:
-                    new_cols[f"{feat}_mean_{w}"] = df[feat].rolling(window=w, min_periods=1).mean()
-                    new_cols[f"{feat}_std_{w}"] = df[feat].rolling(window=w, min_periods=1).std().fillna(0.0)
+                    new_cols[f"{feat}_mean_{w}"] = df[feat].rolling(window=w, min_periods=w).mean()
+                    new_cols[f"{feat}_std_{w}"] = df[feat].rolling(window=w, min_periods=w).std()
 
         for feat in ["rpm", "cht_C", "egt_C", "oil_temperature_C", "oil_pressure_bar", "vibration_rms", "fuel_flow_kg_s", "power_W"]:
             if feat in df.columns:
                 for w in [6, 12]:
-                    prev = df[feat].shift(w).bfill().fillna(0.0)
-                    elapsed_hours = w * 10 / 60.0
+                    prev = df[feat].shift(w)
+                    elapsed_hours = w * 10.0 / 60.0
                     new_cols[f"{feat}_slope_{w}"] = (df[feat] - prev) / max(0.001, elapsed_hours)
-                new_cols[f"{feat}_delta"] = df[feat].diff(1).fillna(0.0)
+                new_cols[f"{feat}_delta"] = df[feat].diff(1)
 
         df = pd.concat([df, pd.DataFrame(new_cols)], axis=1)
 
         latest_row = df.iloc[-1]
         feature_dict = {}
         for col in feature_cols:
-            feature_dict[col] = float(latest_row[col]) if col in latest_row else 0.0
+            if col in latest_row:
+                val = latest_row[col]
+                if pd.isna(val):
+                    return None
+                feature_dict[col] = float(val)
+            else:
+                return None
 
-        return pd.DataFrame([feature_dict], columns=feature_cols)
+        res_df = pd.DataFrame([feature_dict], columns=feature_cols)
+        if res_df.isna().any().any():
+            return None
+
+        return res_df
