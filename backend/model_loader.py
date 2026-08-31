@@ -132,28 +132,30 @@ class DigitalTwinModelManager:
             "decision_function": round(decision_val, 4)
         }
 
-    def predict_degradation(self, df_120_features: pd.DataFrame, clean_sample: Optional[dict] = None) -> dict:
+    def predict_degradation(
+        self,
+        df_120_features: pd.DataFrame,
+        clean_sample: Optional[dict] = None
+    ) -> dict:
         """
         Model 2: Degradation Estimation Inference.
-        Uses telemetry ground truth when available in telemetry frames, else uses XGBoost Model inference.
+
+        IMPORTANT:
+        Ground-truth fields such as `degradation` and `health_index`
+        are never used for inference.
+
+        The XGBoost model predicts degradation exclusively from
+        the generated 120-feature vector.
         """
-        if clean_sample and "degradation" in clean_sample:
-            deg_score = float(clean_sample["degradation"])
-            deg_score = max(0.0, min(1.0, deg_score))
-            health_pct = (1.0 - deg_score) * 100.0
-        elif clean_sample and "health_index" in clean_sample:
-            health_val = float(clean_sample["health_index"])
-            if health_val <= 1.0:
-                health_pct = health_val * 100.0
-                deg_score = 1.0 - health_val
-            else:
-                health_pct = health_val
-                deg_score = 1.0 - (health_val / 100.0)
-        else:
-            inp = df_120_features[self.degradation_feature_cols].astype(float)
-            deg_score = float(self.degradation_model.predict(inp.values)[0])
-            deg_score = max(0.0, min(1.0, deg_score))
-            health_pct = (1.0 - deg_score) * 100.0
+
+        inp = df_120_features[self.degradation_feature_cols].astype(float)
+
+        deg_score = float(
+            self.degradation_model.predict(inp.values)[0]
+        )
+
+        deg_score = max(0.0, min(1.0, deg_score))
+        health_pct = (1.0 - deg_score) * 100.0
 
         return {
             "degradation_index": round(deg_score, 4),

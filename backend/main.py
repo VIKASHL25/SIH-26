@@ -20,38 +20,103 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
 
 def run_cli_simulation(mission_id: int = 1, steps: int = 30):
     """Runs a headless simulation step demo printing state outputs."""
-    logger.info(f"Running Headless Simulation Demo for Mission {mission_id} ({steps} steps)...")
+
+    logger.info(
+        f"Running Headless Simulation Demo for Mission "
+        f"{mission_id} ({steps} steps)..."
+    )
+
     engine = MissionSimulationEngine()
-    engine.initialize()
-    engine.load_mission(mission_id)
 
-    print("\n" + "="*80)
-    print(f"DIGITAL TWIN SIMULATION ENGINE DEMO - MISSION {mission_id}")
-    print("="*80)
+    try:
+        engine.initialize()
+        engine.load_mission(mission_id)
 
-    for step_num in range(1, steps + 1):
-        payload = engine.step()
-        if payload is None:
-            break
+        print("\n" + "=" * 80)
+        print(
+            f"DIGITAL TWIN SIMULATION ENGINE DEMO - "
+            f"MISSION {mission_id}"
+        )
+        print("=" * 80)
 
-        rul = payload['rul_prediction']
-        if rul.get('status') == "COLLECTING_HISTORY":
-            rul_str = f"COLLECTING_HISTORY ({rul.get('records_available', 0)}/{rul.get('records_required', 13)} ticks)"
-        else:
-            rul_str = f"{rul['predicted_rul_hours']} hrs (P10: {rul['rul_lower_bound_p10']}h – P90: {rul['rul_upper_bound_p90']}h | ±{rul['uncertainty_std_hours']}h | Conf: {rul['confidence_level']})"
+        for step_num in range(1, steps + 1):
 
-        print(f"\n--- [TICK #{step_num}] Timestamp: {payload['timestamp_s']}s | Mission: {payload['mission_id']} ---")
-        print(f"RPM: {payload['telemetry']['rpm']} | CHT: {payload['telemetry']['cht_C']}°C | EGT: {payload['telemetry']['egt_C']}°C | Oil Press: {payload['telemetry']['oil_pressure_bar']} bar")
-        print(f"Physics CHT Residual: {payload['physics_model']['cht_residual']}°C | Physics Residual C: {payload['physics_model']['physics_residual_C']}°C")
-        print(f"1. Anomaly Detection Score: {payload['anomaly_detection']['anomaly_score']} (Anomaly: {payload['anomaly_detection']['is_anomaly']})")
-        print(f"2. Degradation Health Index: {payload['degradation_estimation']['estimated_health_pct']}% (Degradation: {payload['degradation_estimation']['degradation_index']})")
-        print(f"3. Fault Classification: {payload['fault_classification']['predicted_fault']} (Confidence: {payload['fault_classification']['confidence']*100:.1f}%)")
-        print(f"4. Remaining Useful Life (RUL): {rul_str}")
-        print(f"Advisories: {payload['advisories']}")
+            payload = engine.step()
 
-    print("\n" + "="*80)
-    print("SIMULATION DEMO COMPLETED SUCCESSFULLY")
-    print("="*80)
+            if payload is None:
+                break
+
+            rul = payload["rul_prediction"]
+
+            if rul.get("status") == "COLLECTING_HISTORY":
+                rul_str = (
+                    f"COLLECTING_HISTORY "
+                    f"({rul.get('records_available', 0)}/"
+                    f"{rul.get('records_required', 13)} ticks)"
+                )
+            else:
+                rul_str = (
+                    f"{rul['predicted_rul_hours']} hrs "
+                    f"(P10: {rul['rul_lower_bound_p10']}h – "
+                    f"P90: {rul['rul_upper_bound_p90']}h | "
+                    f"±{rul['uncertainty_std_hours']}h | "
+                    f"Conf: {rul['confidence_level']})"
+                )
+
+            print(
+                f"\n--- [TICK #{step_num}] "
+                f"Timestamp: {payload['timestamp_s']}s | "
+                f"Mission: {payload['mission_id']} ---"
+            )
+
+            print(
+                f"RPM: {payload['telemetry']['rpm']} | "
+                f"CHT: {payload['telemetry']['cht_C']}°C | "
+                f"EGT: {payload['telemetry']['egt_C']}°C | "
+                f"Oil Press: "
+                f"{payload['telemetry']['oil_pressure_bar']} bar"
+            )
+
+            print(
+                f"Physics CHT Residual: "
+                f"{payload['physics_model']['cht_residual']}°C | "
+                f"Physics Residual C: "
+                f"{payload['physics_model']['physics_residual_C']}°C"
+            )
+
+            print(
+                f"1. Anomaly Detection Score: "
+                f"{payload['anomaly_detection']['anomaly_score']} "
+                f"(Anomaly: "
+                f"{payload['anomaly_detection']['is_anomaly']})"
+            )
+
+            print(
+                f"2. Degradation Health Index: "
+                f"{payload['degradation_estimation']['estimated_health_pct']}% "
+                f"(Degradation: "
+                f"{payload['degradation_estimation']['degradation_index']})"
+            )
+
+            print(
+                f"3. Fault Classification: "
+                f"{payload['fault_classification']['predicted_fault']} "
+                f"(Confidence: "
+                f"{payload['fault_classification']['confidence'] * 100:.1f}%)"
+            )
+
+            print(
+                f"4. Remaining Useful Life (RUL): {rul_str}"
+            )
+
+            print(f"Advisories: {payload['advisories']}")
+
+        print("\n" + "=" * 80)
+        print("SIMULATION DEMO COMPLETED SUCCESSFULLY")
+        print("=" * 80)
+
+    finally:
+        engine.close()
 
 def main():
     parser = argparse.ArgumentParser(description="MALE UAV Aero Piston Engine Digital Twin Backend CLI")

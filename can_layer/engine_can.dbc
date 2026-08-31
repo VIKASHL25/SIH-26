@@ -1,0 +1,72 @@
+VERSION ""
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    SGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_DEF_DEF_REL_
+    BU_SG_REL_
+    BU_EV_REL_
+    BU_BO_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: SENSOR_SIM ECU_FADEC FLIGHT_CTRL GCS
+
+BO_ 256 ENGINE_STATE: 8 SENSOR_SIM
+ SG_ RPM : 0|16@1+ (1,0) [0|10000] "rpm" ECU_FADEC
+ SG_ Throttle : 16|16@1+ (0.01,0) [0|100] "%" ECU_FADEC
+ SG_ Load : 32|16@1+ (0.01,0) [0|100] "%" ECU_FADEC
+
+BO_ 257 THERMAL: 8 SENSOR_SIM
+ SG_ CHT : 0|16@1+ (0.1,0) [-100|400] "degC" ECU_FADEC
+ SG_ EGT : 16|16@1+ (0.1,0) [0|1000] "degC" ECU_FADEC
+ SG_ OilTemperature : 32|16@1+ (0.1,0) [-100|300] "degC" ECU_FADEC
+ SG_ OilPressure : 48|16@1+ (0.01,0) [0|20] "bar" ECU_FADEC
+
+BO_ 258 AIR_FUEL: 8 SENSOR_SIM
+ SG_ AirMassFlow : 0|16@1+ (0.0001,0) [0|6.5] "kg/s" ECU_FADEC
+ SG_ FuelFlow : 16|16@1+ (0.0001,0) [0|6.5] "kg/s" ECU_FADEC
+
+BO_ 259 MECHANICAL: 8 SENSOR_SIM
+ SG_ Torque : 0|16@1+ (0.01,0) [0|655.35] "Nm" ECU_FADEC
+ SG_ Power : 16|32@1+ (1,0) [0|4294967295] "W" ECU_FADEC
+ SG_ Vibration : 48|16@1+ (0.001,0) [0|65.535] "g" ECU_FADEC
+
+BO_ 260 ELECTRICAL: 8 SENSOR_SIM
+ SG_ BatteryVoltage : 0|16@1+ (0.01,0) [0|655.35] "V" ECU_FADEC
+ SG_ AlternatorCurrent : 16|16@1+ (0.01,0) [0|655.35] "A" ECU_FADEC
+ SG_ AlternatorHealth : 32|8@1+ (0.01,0) [0|2.55] "" ECU_FADEC
+
+BO_ 261 ENVIRONMENT: 8 SENSOR_SIM
+ SG_ Altitude : 0|32@1+ (0.1,0) [0|429496729.5] "m" ECU_FADEC
+ SG_ AmbientTemperature : 32|16@1+ (0.1,0) [-100|300] "degC" ECU_FADEC
+ SG_ Pressure : 48|16@1+ (0.01,0) [0|655.35] "kPa" ECU_FADEC
+
+BO_ 262 INJECTION: 8 SENSOR_SIM
+ SG_ InjectionTiming : 0|16@1+ (0.01,0) [-327.68|327.67] "deg" ECU_FADEC
+
+BO_ 263 AIR_DENSITY: 8 SENSOR_SIM
+ SG_ AirDensity : 0|16@1+ (0.0001,0) [0|6.5535] "kg/m3" ECU_FADEC

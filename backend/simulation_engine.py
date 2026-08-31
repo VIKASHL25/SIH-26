@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 from backend.config import DATASET_100K_PATH
 from backend.model_loader import DigitalTwinModelManager
 from backend.feature_engine import DigitalTwinFeatureEngine
+from backend.can_adapter import CANTelemetryAdapter
 
 logger = logging.getLogger("MissionSimulationEngine")
 
@@ -20,6 +21,44 @@ class MissionSimulationEngine:
     3. Unified 4-Model real-time AI/ML inference execution.
     4. Mission health monitoring & advisory generation with alert level state tracking (anti-spam).
     """
+    REALTIME_INPUT_COLUMNS = [
+        "timestamp_s",
+        "engine_id",
+        "mission_id",
+        "mission_type",
+
+        # Environment / operating conditions
+        "altitude_m",
+        "ambient_temp_C",
+        "pressure_kPa",
+        "air_density_kg_m3",
+        "throttle_pct",
+        "load_pct",
+
+        # Engine telemetry
+        "rpm",
+        "air_mass_flow_kg_s",
+        "fuel_flow_kg_s",
+        "torque_Nm",
+        "power_W",
+        "cht_C",
+        "egt_C",
+        "oil_temperature_C",
+        "oil_pressure_bar",
+        "vibration_rms",
+
+        # Electrical / injection
+        "battery_voltage_V",
+        "alternator_current_A",
+        "alternator_health",
+        "injection_timing_deg",
+
+        # Digital Twin physics reference values
+        "expected_rpm",
+        "expected_cht_C",
+        "expected_egt_C",
+        "physics_residual_C",
+    ]
 
     def __init__(self, dataset_path: str = str(DATASET_100K_PATH)):
         self.dataset_path = dataset_path
@@ -39,6 +78,12 @@ class MissionSimulationEngine:
         # Model Manager & Feature Engine
         self.model_manager = DigitalTwinModelManager()
         self.feature_engine = DigitalTwinFeatureEngine()
+
+        # CAN Adapter
+        self.can_adapter = CANTelemetryAdapter(
+            backend="virtual",
+            channel="engine_backend",
+        )
 
         # Fault Injection Overrides
         self.fault_overrides: Dict[str, float] = {}
@@ -117,6 +162,12 @@ class MissionSimulationEngine:
         self.fault_overrides.clear()
         logger.info("Fault overrides cleared.")
 
+    def close(self):
+        """Release simulation resources."""
+        if self.can_adapter is not None:
+            self.can_adapter.close()
+            self.can_adapter = None
+
     def step(self) -> Optional[Dict[str, Any]]:
         """Advances simulation by 1 tick and evaluates all 4 models."""
         if self.mission_df is None or self.mission_df.empty:
@@ -126,18 +177,60 @@ class MissionSimulationEngine:
             self.current_frame_idx = 0
 
         # Get raw telemetry row
-        raw_row = self.mission_df.iloc[self.current_frame_idx].to_dict()
+        source_row = self.mission_df.iloc[self.current_frame_idx]
+        raw_row = {
+            col: source_row[col]
+            for col in self.REALTIME_INPUT_COLUMNS
+            if col in source_row.index
+        }
 
         # Apply synthetic overrides if active
         for param, delta_or_val in self.fault_overrides.items():
             if param in raw_row:
                 raw_row[param] = float(raw_row[param]) + delta_or_val
 
+        # Preserve backend metadata outside the CAN telemetry payload.
+        metadata = {
+            "timestamp_s": raw_row.get("timestamp_s"),
+            "engine_id": raw_row.get("engine_id"),
+            "mission_id": raw_row.get("mission_id"),
+            "mission_type": raw_row.get("mission_type"),
+        }
+
+        # Extract only normalized telemetry signals handled by the CAN layer.
+        can_telemetry = {
+            key: float(value)
+            for key, value in raw_row.items()
+            if key in self.can_adapter.SUPPORTED_SIGNALS
+        }
+
+        # CSV -> CAN -> RX -> decoded telemetry
+        decoded_telemetry = self.can_adapter.transmit_and_receive(can_telemetry)
+
+        # Reconstruct the backend sample.
+        raw_row = {
+            **metadata,
+            **decoded_telemetry,
+        }
+
+        # Preserve Digital Twin reference values used by the feature engine.
+        for key in (
+            "expected_rpm",
+            "expected_cht_C",
+            "expected_egt_C",
+            "physics_residual_C",
+        ):
+            if key in self.mission_df.columns:
+                raw_row[key] = source_row[key]
+
         # Advance frame index for next step
         self.current_frame_idx += 1
 
-        # Process through feature engine & generate model feature vectors
-        fv = self.feature_engine.generate_all_feature_vectors(raw_row, self.model_manager)
+        # Process decoded CAN telemetry through the existing ML pipeline.
+        fv = self.feature_engine.generate_all_feature_vectors(
+            raw_row,
+            self.model_manager
+        )
         buffer_len = len(self.feature_engine.buffer)
 
         # Run inference across all 4 models (handles fv["rul"] being None)

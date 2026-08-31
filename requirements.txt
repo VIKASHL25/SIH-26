@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+numpy>=1.24
+pandas>=2.0
+joblib
+scikit-learn==1.6.1
+xgboost>=2.0
+python-can>=4.5
+cantools>=40
