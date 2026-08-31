@@ -8,6 +8,7 @@ from backend.config import DATASET_100K_PATH
 from backend.model_loader import DigitalTwinModelManager
 from backend.feature_engine import DigitalTwinFeatureEngine
 from backend.can_adapter import CANTelemetryAdapter
+from explainability.xai_engine import DigitalTwinXAIEngine
 
 logger = logging.getLogger("MissionSimulationEngine")
 
@@ -20,6 +21,7 @@ class MissionSimulationEngine:
     2. Dynamic parameter overrides & synthetic fault injection.
     3. Unified 4-Model real-time AI/ML inference execution.
     4. Mission health monitoring & advisory generation with alert level state tracking (anti-spam).
+    5. Explainable AI (XAI) multi-model diagnostic and attribution engine.
     """
     REALTIME_INPUT_COLUMNS = [
         "timestamp_s",
@@ -75,9 +77,10 @@ class MissionSimulationEngine:
         # Alert State Tracking per Mission (Anti-Spam)
         self.last_alert_levels: Dict[str, Any] = {}
 
-        # Model Manager & Feature Engine
+        # Model Manager, Feature Engine, & XAI Engine
         self.model_manager = DigitalTwinModelManager()
         self.feature_engine = DigitalTwinFeatureEngine()
+        self.xai_engine = DigitalTwinXAIEngine()
 
         # CAN Adapter
         self.can_adapter = CANTelemetryAdapter(
@@ -90,11 +93,12 @@ class MissionSimulationEngine:
         self.env_overrides: Dict[str, float] = {}
 
     def initialize(self):
-        """Loads dataset and models."""
+        """Loads dataset, models, and XAI explainers."""
         logger.info("Initializing Mission Simulation Engine...")
         
         # Load Models
         self.model_manager.load_all_models()
+        self.xai_engine.initialize(self.model_manager)
 
         # Load Dataset
         logger.info(f"Loading dataset from: {self.dataset_path}")
@@ -252,6 +256,9 @@ class MissionSimulationEngine:
         # Generate Maintenance Advisory with State Tracking (anti-spam)
         advisories = self._generate_maintenance_advisories(predictions, fv["clean_sample"])
 
+        # Generate Explainable AI (XAI) multi-model explanations
+        xai_payload = self.xai_engine.explain(fv, predictions, self.model_manager)
+
         # Construct Consolidated Digital Twin Frame Payload
         payload = {
             "timestamp_s": int(raw_row.get("timestamp_s", self.current_frame_idx)),
@@ -299,7 +306,8 @@ class MissionSimulationEngine:
             "degradation_estimation": predictions["degradation_estimation"],
             "fault_classification": predictions["fault_classification"],
             "rul_prediction": predictions["rul_prediction"],
-            "advisories": advisories
+            "advisories": advisories,
+            "xai": xai_payload
         }
 
         return payload

@@ -1,0 +1,8 @@
+# Explainable AI (XAI) Dependencies for Aero Piston Engine Digital Twin
+# Minimal required packages for SHAP, sensitivity analysis, and model inference
+shap>=0.42.0
+numpy>=1.24.0
+pandas>=2.0.0
+xgboost>=1.7.0
+scikit-learn>=1.2.0
+joblib>=1.2.0
