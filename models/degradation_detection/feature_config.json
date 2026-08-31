@@ -1,0 +1,54 @@
+{
+  "target": "degradation",
+  "excluded_columns": [
+    "timestamp_s",
+    "engine_id",
+    "mission_id",
+    "mission_type",
+    "fault_type",
+    "fault_severity",
+    "degradation",
+    "failure_flag",
+    "rul_hours",
+    "health_index",
+    "alternator_health"
+  ],
+  "physics_features": [
+    "physics_residual_C",
+    "rpm_residual",
+    "egt_residual"
+  ],
+  "ratio_features": [
+    "fuel_air_ratio",
+    "power_per_fuel",
+    "torque_per_rpm",
+    "power_per_air"
+  ],
+  "temporal_columns": [
+    "rpm",
+    "egt_C",
+    "cht_C",
+    "oil_temperature_C",
+    "oil_pressure_bar",
+    "vibration_rms",
+    "fuel_flow_kg_s",
+    "air_mass_flow_kg_s",
+    "rpm_residual",
+    "egt_residual"
+  ],
+  "temporal_lags": [
+    1,
+    5,
+    10
+  ],
+  "rolling_windows": [
+    5,
+    15,
+    30
+  ],
+  "output_range": [
+    0,
+    1
+  ],
+  "random_state": 42
+}
