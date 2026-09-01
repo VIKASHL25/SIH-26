@@ -60,8 +60,8 @@ def run(
                         f"stream row {packet.stream_row_id}"
                     )
 
-                signal, value = decode_frame(frame)
-                decoded[signal] = value
+                decoded_dict = decode_frame(frame)
+                decoded.update(decoded_dict)
 
             telemetry_packet = {
                 "stream_row_id": packet.stream_row_id,
