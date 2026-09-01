@@ -88,6 +88,13 @@ def main():
         client.post(f"{GATEWAY_URL}/api/simulation/clear_faults")
         logger.info("[SUCCESS] Synthetic fault cleared successfully!")
 
+        # Test 6: Verify Advisory History Retrieval
+        logger.info("Test 6: Checking MongoDB Atlas Advisory History Retrieval...")
+        adv_res = client.get(f"{GATEWAY_URL}/api/db/advisories?mission_id=999")
+        assert adv_res.status_code == 200
+        adv_list = adv_res.json().get("advisories", [])
+        logger.info(f"[SUCCESS] Retrieved {len(adv_list)} advisories from MongoDB Atlas advisory_history collection!")
+
     logger.info("=================================================================")
     logger.info("ALL 5 MICROSERVICES & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!")
     logger.info("=================================================================")

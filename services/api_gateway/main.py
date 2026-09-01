@@ -93,6 +93,7 @@ async def enrich_and_persist_telemetry(client: httpx.AsyncClient, payload: dict)
     # Async log frame payload to MongoDB Persistence Service (Port 8004)
     if "telemetry" in payload and "degradation_estimation" in payload:
         try:
+            advisories_list = payload.get("advisories", [])
             db_log_data = {
                 "mission_id": payload.get("mission_id", 1),
                 "frame_index": payload.get("frame_index", 0),
@@ -106,9 +107,41 @@ async def enrich_and_persist_telemetry(client: httpx.AsyncClient, payload: dict)
                     "rul": payload.get("rul_prediction", {})
                 },
                 "xai_drivers": (payload.get("xai") or payload.get("xai_explanation", {})).get("top_diagnostic_drivers", []),
-                "advisories": payload.get("advisories", [])
+                "advisories": advisories_list
             }
             await client.post(f"{MONGO_SERVICE_URL}/log_telemetry", json=db_log_data, timeout=1.0)
+
+            # Persist each advisory to advisory_history collection in MongoDB
+            if advisories_list:
+                for adv_msg in advisories_list:
+                    alert_type = "NOMINAL"
+                    if "CRITICAL" in adv_msg or "ALERT" in adv_msg:
+                        alert_type = "CRITICAL_ALERT"
+                    elif "WARNING" in adv_msg or "ADVISORY" in adv_msg:
+                        alert_type = "WARNING_ADVISORY"
+                    elif "URGENT" in adv_msg:
+                        alert_type = "URGENT_MAINTENANCE"
+                    
+                    rec_action = "Continue nominal flight monitoring."
+                    if alert_type == "CRITICAL_ALERT":
+                        rec_action = "Initiate Return-to-Base (RTB) immediately. Inspect propulsion system."
+                    elif alert_type in ["WARNING_ADVISORY", "URGENT_MAINTENANCE"]:
+                        rec_action = "Schedule depot maintenance inspection post-mission."
+
+                    health_pct = float(payload.get("degradation_estimation", {}).get("estimated_health_pct", 100.0))
+                    rul_hrs = payload.get("rul_prediction", {}).get("predicted_rul_hours")
+
+                    adv_payload = {
+                        "mission_id": payload.get("mission_id", 1),
+                        "frame_index": payload.get("frame_index", 0),
+                        "alert_type": alert_type,
+                        "health_index_pct": health_pct,
+                        "predicted_rul_hours": rul_hrs,
+                        "message": adv_msg,
+                        "recommended_action": rec_action
+                    }
+                    await client.post(f"{MONGO_SERVICE_URL}/log_advisory", json=adv_payload, timeout=1.0)
+
         except Exception as e:
             logger.debug(f"MongoDB logging error: {e}")
 
