@@ -11,7 +11,8 @@ ANOMALY_SCALER_PATH = BASE_DIR / "models" / "anomaly_detection" / "scaler.pkl"
 DEGRADATION_MODEL_PATH = BASE_DIR / "models" / "degradation_detection" / "xgb_degradation_model.json"
 DEGRADATION_FEATURE_COLS_PATH = BASE_DIR / "models" / "degradation_detection" / "feature_columns.json"
 
-FAULT_MODEL_PATH = BASE_DIR / "models" / "fault_detection" / "fault_detection_multiclass_xgb.pkl"
+FAULT_MODEL_PATH = BASE_DIR / "models" / "fault_detection" / "fault_detection_multiclass_xgb.json"
+FAULT_MODEL_PKL_PATH = BASE_DIR / "models" / "fault_detection" / "fault_detection_multiclass_xgb.pkl"
 FAULT_LABEL_ENCODER_PATH = BASE_DIR / "models" / "fault_detection" / "fault_detection_label_encoder.pkl"
 FAULT_FEATURE_COLS_PATH = BASE_DIR / "models" / "fault_detection" / "fault_detection_multiclass_feature_cols.json"
 

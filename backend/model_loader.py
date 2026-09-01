@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import joblib
@@ -11,6 +12,7 @@ from backend.config import (
     DEGRADATION_MODEL_PATH,
     DEGRADATION_FEATURE_COLS_PATH,
     FAULT_MODEL_PATH,
+    FAULT_MODEL_PKL_PATH,
     FAULT_LABEL_ENCODER_PATH,
     FAULT_FEATURE_COLS_PATH,
     RUL_MODEL_PATH,
@@ -91,7 +93,13 @@ class DigitalTwinModelManager:
 
         # 3. Load Fault Classification Model & Label Encoder
         try:
-            self.fault_model = joblib.load(FAULT_MODEL_PATH)
+            if str(FAULT_MODEL_PATH).endswith(".json") and os.path.exists(str(FAULT_MODEL_PATH)):
+                self.fault_model = XGBClassifier()
+                self.fault_model.load_model(str(FAULT_MODEL_PATH))
+            elif os.path.exists(str(FAULT_MODEL_PKL_PATH)):
+                self.fault_model = joblib.load(FAULT_MODEL_PKL_PATH)
+            else:
+                self.fault_model = joblib.load(FAULT_MODEL_PATH)
             self.fault_label_encoder = joblib.load(FAULT_LABEL_ENCODER_PATH)
             with open(FAULT_FEATURE_COLS_PATH, "r") as f:
                 self.fault_feature_cols = json.load(f)
