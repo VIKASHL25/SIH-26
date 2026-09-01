@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 import pandas as pd
@@ -112,12 +113,29 @@ class MissionSimulationEngine:
 
     def get_available_missions(self) -> List[int]:
         """Returns list of unique mission IDs in the dataset."""
+        missions = []
         if self.df_raw is not None and "mission_id" in self.df_raw.columns:
-            return sorted(self.df_raw["mission_id"].unique().tolist())
-        return []
+            missions = sorted(self.df_raw["mission_id"].unique().tolist())
+        demo_path = os.path.join(os.path.dirname(self.dataset_path), "demo_synthetic_flight_test.csv")
+        if os.path.exists(demo_path) and 999 not in missions:
+            missions.append(999)
+        return sorted(missions)
 
     def load_mission(self, mission_id: int):
         """Loads a specific mission dataset for replay."""
+        demo_path = os.path.join(os.path.dirname(self.dataset_path), "demo_synthetic_flight_test.csv")
+        if mission_id == 999 and os.path.exists(demo_path):
+            demo_df = pd.read_csv(demo_path)
+            self.active_mission_id = 999
+            self.mission_df = demo_df.sort_values("timestamp_s").reset_index(drop=True)
+            self.current_frame_idx = 0
+            self.feature_engine.reset()
+            self.model_manager.reset_state()
+            self.last_alert_levels = {}
+            self.state = "PAUSED"
+            logger.info(f"Loaded Out-of-Sample Demo Mission 999 ({len(self.mission_df)} frames). Alert levels reset.")
+            return
+
         if self.df_raw is None:
             raise ValueError("Dataset not loaded.")
         
@@ -359,26 +377,30 @@ class MissionSimulationEngine:
                 logger.info(msg)
             self.last_alert_levels["FAULT"] = fault_state
 
-        # 3. DEGRADATION Alert State (Bands: NORMAL >= 70%, ELEVATED 50-70%, CRITICAL < 50%)
-        if health_pct < 50.0:
+        # 3. DEGRADATION Alert State (Defense Standards: NORMAL >= 60%, MODERATE 35-60%, CRITICAL < 35%)
+        if health_pct < 35.0:
             deg_state = "CRITICAL"
-        elif health_pct < 70.0:
-            deg_state = "ELEVATED"
+        elif health_pct < 60.0:
+            deg_state = "MODERATE"
         else:
             deg_state = "NORMAL"
 
         if deg_state != self.last_alert_levels.get("DEGRADATION"):
-            if deg_state in ["ELEVATED", "CRITICAL"]:
-                msg = f"ALERT: Engine degradation level elevated (Health Index: {health_pct}%). Schedule depot maintenance."
+            if deg_state == "MODERATE":
+                msg = f"ADVISORY: Engine degradation elevated (Health Index: {health_pct:.1f}%). Schedule depot maintenance post-mission."
+                advisories.append(msg)
+                logger.info(msg)
+            elif deg_state == "CRITICAL":
+                msg = f"ALERT: Critical engine degradation (Health Index: {health_pct:.1f}%). Initiate Return-to-Base (RTB)."
                 advisories.append(msg)
                 logger.warning(msg)
             self.last_alert_levels["DEGRADATION"] = deg_state
 
-        # 4. RUL LOW Alert State
-        rul_state = "LOW" if (rul_hours is not None and rul_hours < 25.0) else "OK"
+        # 4. RUL LOW Alert State (< 10.0 hours remaining)
+        rul_state = "LOW" if (rul_hours is not None and rul_hours < 10.0) else "OK"
         if rul_state != self.last_alert_levels.get("RUL_LOW"):
             if rul_state == "LOW":
-                msg = f"URGENT: Low RUL remaining ({rul_hours} hours). Plan engine swap before next endurance mission."
+                msg = f"URGENT: Low RUL remaining ({rul_hours:.1f} hours). Plan engine replacement before next mission."
                 advisories.append(msg)
                 logger.warning(msg)
             self.last_alert_levels["RUL_LOW"] = rul_state

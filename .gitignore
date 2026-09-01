@@ -2,12 +2,17 @@
 __pycache__/
 *.py[cod]
 *$py.class
+tempCodeRunnerFile.py
+scratch/tempCodeRunnerFile.py
 
 # Environments
 .env
 venv/
 env/
 ENV/
+
+# Temporary data / CSV exports
+decoded_telemetry.csv
 
 # IDE & OS files
 .vscode/

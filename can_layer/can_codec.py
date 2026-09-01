@@ -133,6 +133,11 @@ def encode_telemetry(values: Dict[str, float]) -> List[can.Message]:
         if not signal_values:
             continue
 
+        # Fill default values for any missing signals required by the DBC message definition
+        for sig in msg_def.signals:
+            if sig.name not in signal_values:
+                signal_values[sig.name] = float(sig.initial if sig.initial is not None else 0.0)
+
         payload = msg_def.encode(signal_values)
 
         frame = can.Message(
