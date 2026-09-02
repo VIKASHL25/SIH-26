@@ -31,7 +31,7 @@ This repository implements a **Defense-in-Depth Security Model** for the DRDO / 
 - **Zero Hardcoded Credentials**: Connection strings (`MONGO_URL`) and internal keys are read dynamically from environment variables using `python-dotenv`. `.env.example` provides safe templates.
 
 ### 6. Model Integrity & Traceability
-- **SHA-256 Model Fingerprinting**: At startup, `backend/model_loader.py` computes SHA-256 hashes for all 4 trained AI/ML models (`Isolation Forest`, `XGBoost Health Regressor`, `Multiclass Fault Classifier`, `ExtraTrees RUL Estimator`).
+- **SHA-256 Model Fingerprinting**: At startup, `backend/model_loader.py` computes SHA-256 hashes for all 4 trained AI/ML models (`Isolation Forest`, `XGBoost Health Regressor`, `Multiclass Fault Classifier`, `XGBoost Regressor (131 features, with post-processing: degradation-aware anchoring, exponential smoothing, slew-rate limiting, and quantile-sampling-based uncertainty quantification for P10-P90 confidence intervals)`).
 - **Integrity Validation**: Hashes are verified against `models/model_hashes.json`. Discrepancies trigger `CRITICAL: [SECURITY WARNING] Model file integrity mismatch!` alerts.
 - **Prediction Traceability**: Prediction outputs include `"metadata": {"model_hashes": ...}` ensuring auditability to exact verified model artifact versions.
 

@@ -129,7 +129,12 @@ def main():
     print(f"{'Local-Only (Isolated UAV)':<30} | {avg_local_rmse:<8.3f} | {'N/A':<8} | {'N/A':<8} | High (No External Sharing)")
     print(f"{'Federated Global Model (FedAvg)':<30} | {rmse_fed:<8.3f} | {mae_fed:<8.3f} | {r2_fed:<8.3f} | DEFENSE-GRADE (Zero Telemetry Shared)")
     print("-" * 85)
-    logger.info("[SUCCESS] Federated Aggregation achieved model accuracy within 1.2% of Centralized Model without transmitting any raw flight telemetry!")
+    rmse_gap_pct = ((rmse_fed - rmse_central) / rmse_central) * 100
+    logger.info(
+        f"[RESULT] Federated model RMSE ({rmse_fed:.3f}) is {rmse_gap_pct:.1f}% higher than the centralized model "
+        f"({rmse_central:.3f}), and outperforms the average local-only model (RMSE {avg_local_rmse:.3f}) by "
+        f"{((avg_local_rmse - rmse_fed) / avg_local_rmse * 100):.1f}%, while never transmitting raw flight telemetry off-node."
+    )
 
 if __name__ == "__main__":
     main()

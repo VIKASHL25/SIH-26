@@ -21,8 +21,21 @@ logger = logging.getLogger("EdgeAIBenchmark")
 
 def get_file_size_kb(filepath: str) -> float:
     if os.path.exists(filepath):
-        return round(os.path.getsize(filepath) / 1024.0, 2)
+        size_kb = round(os.path.getsize(filepath) / 1024.0, 2)
+        if size_kb == 0.0:
+            logger.warning(f"Model file at {filepath} exists but is empty (0.0 KB)!")
+        return size_kb
+    logger.warning(f"Expected model artifact missing at path: {filepath}")
     return 0.0
+
+def derive_model_tier(latency_ms: float) -> str:
+    """Derives honest target execution tier based on latency budget."""
+    if latency_ms < 2.0:
+        return "Onboard Edge (Flight Computer, <2ms)"
+    elif latency_ms < 50.0:
+        return "GCS / Edge Analytics (<50ms)"
+    else:
+        return "GCS Batch / Offline Analytics (>50ms)"
 
 def main():
     logger.info("=================================================================")
@@ -33,11 +46,11 @@ def main():
     mm = DigitalTwinModelManager()
     mm.load_all_models()
 
-    # 1. Model Artifact Size Benchmarking
+    # 1. Model Artifact Size Benchmarking (Corrected paths)
     models_dir = os.path.abspath("models")
     anomaly_path = os.path.join(models_dir, "anomaly_detection", "isolation_forest_model.pkl")
-    degradation_path = os.path.join(models_dir, "degradation_estimation", "xgboost_degradation_model.json")
-    fault_path = os.path.join(models_dir, "fault_classification", "xgboost_fault_model.json")
+    degradation_path = os.path.join(models_dir, "degradation_detection", "xgb_degradation_model.json")
+    fault_path = os.path.join(models_dir, "fault_detection", "fault_detection_multiclass_xgb.json")
     rul_path = os.path.join(models_dir, "rul_prediction", "xgboost_rul_model.json")
 
     anomaly_size = get_file_size_kb(anomaly_path)
@@ -87,16 +100,29 @@ def main():
     # Total 4-Model Combined Pipeline Latency
     total_latency_ms = anomaly_latency_ms + degradation_latency_ms + fault_latency_ms + rul_latency_ms
 
-    print("\n" + "=" * 90)
+    # Dynamic verdict calculation based on latency
+    if total_latency_ms < 10.0:
+        pipeline_verdict = "Real-Time Suitable (<10ms)"
+    elif total_latency_ms < 50.0:
+        pipeline_verdict = f"Near Real-Time ({total_latency_ms:.1f}ms, suitable for GCS-side/ground analytics)"
+    else:
+        pipeline_verdict = f"Batch/Periodic Suitable ({total_latency_ms:.1f}ms)"
+
+    anomaly_tier = derive_model_tier(anomaly_latency_ms)
+    degradation_tier = derive_model_tier(degradation_latency_ms)
+    fault_tier = derive_model_tier(fault_latency_ms)
+    rul_tier = derive_model_tier(rul_latency_ms)
+
+    print("\n" + "=" * 110)
     print(f"{'AI / ML Model Component':<32} | {'Artifact Size (KB)':<18} | {'Single-Core Latency (ms)':<24} | {'Target Hardware Tier'}")
-    print("-" * 90)
-    print(f"{'1. Anomaly Detection (IsoForest)':<32} | {anomaly_size:<18.1f} | {anomaly_latency_ms:<24.3f} | Onboard UAV Flight Computer (Edge)")
-    print(f"{'2. Degradation Est. (XGBoost)':<32} | {degradation_size:<18.1f} | {degradation_latency_ms:<24.3f} | Onboard / GCS Ground Station")
-    print(f"{'3. Fault Classifier (XGBoost)':<32} | {fault_size:<18.1f} | {fault_latency_ms:<24.3f} | Onboard / GCS Ground Station")
-    print(f"{'4. RUL Predictor (131-Feat XGB)':<32} | {rul_size:<18.1f} | {rul_latency_ms:<24.3f} | GCS Ground Control Station (Cloud)")
-    print("-" * 90)
-    print(f"{'FULL 4-MODEL PIPELINE TOTAL':<32} | {round(anomaly_size+degradation_size+fault_size+rul_size, 1):<18} | {total_latency_ms:<24.3f} | Real-Time Suitable (<10ms target)")
-    print("=" * 90 + "\n")
+    print("-" * 110)
+    print(f"{'1. Anomaly Detection (IsoForest)':<32} | {anomaly_size:<18.1f} | {anomaly_latency_ms:<24.3f} | {anomaly_tier}")
+    print(f"{'2. Degradation Est. (XGBoost)':<32} | {degradation_size:<18.1f} | {degradation_latency_ms:<24.3f} | {degradation_tier}")
+    print(f"{'3. Fault Classifier (XGBoost)':<32} | {fault_size:<18.1f} | {fault_latency_ms:<24.3f} | {fault_tier}")
+    print(f"{'4. RUL Predictor (131-Feat XGB)':<32} | {rul_size:<18.1f} | {rul_latency_ms:<24.3f} | {rul_tier}")
+    print("-" * 110)
+    print(f"{'FULL 4-MODEL PIPELINE TOTAL':<32} | {round(anomaly_size+degradation_size+fault_size+rul_size, 1):<18} | {total_latency_ms:<24.3f} | {pipeline_verdict}")
+    print("=" * 110 + "\n")
 
     # Generate Markdown Report
     report_content = f"""# Edge AI & Lightweight Analytics Benchmarking Report
@@ -105,31 +131,34 @@ def main():
 
 This report evaluates the computational efficiency, memory footprint, and single-core CPU inference latency across all 4 machine learning models in the Digital Twin suite to define optimal hardware allocation between onboard UAV flight computers and Ground Control Stations (GCS).
 
+**Target Latency Budgets:**
+- Onboard Real-Time Control Loop (Tier 1): < 2.0 ms per sample (10Hz - 50Hz telemetry stream)
+- Ground Control Station (GCS) Analytics (Tier 2): < 50.0 ms per sample
+
 ---
 
 ## 2. Benchmark Results Table
 
 | AI Model Component | Artifact Size (KB) | Features | Inference Latency (ms/sample) | Target Execution Tier |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Anomaly Detection (Isolation Forest)** | **{anomaly_size:.1f} KB** | 13 | **{anomaly_latency_ms:.3f} ms** | Onboard Edge (Flight Computer) |
-| **2. Degradation Estimation (XGBoost)** | **{degradation_size:.1f} KB** | 120 | **{degradation_latency_ms:.3f} ms** | Onboard Edge / GCS Station |
-| **3. Fault Classification (XGBoost)** | **{fault_size:.1f} KB** | 55 | **{fault_latency_ms:.3f} ms** | Onboard Edge / GCS Station |
-| **4. RUL Prediction (131-Feat XGBoost)** | **{rul_size:.1f} KB** | 131 | **{rul_latency_ms:.3f} ms** | GCS Station (Cloud Analytics) |
-| **FULL 4-MODEL PIPELINE TOTAL** | **{anomaly_size+degradation_size+fault_size+rul_size:.1f} KB** | — | **{total_latency_ms:.3f} ms** | **Real-Time Compliant (< 10ms Target)** |
+| **1. Anomaly Detection (Isolation Forest)** | **{anomaly_size:.1f} KB** | 13 | **{anomaly_latency_ms:.3f} ms** | {anomaly_tier} |
+| **2. Degradation Estimation (XGBoost)** | **{degradation_size:.1f} KB** | 120 | **{degradation_latency_ms:.3f} ms** | {degradation_tier} |
+| **3. Fault Classification (XGBoost)** | **{fault_size:.1f} KB** | 55 | **{fault_latency_ms:.3f} ms** | {fault_tier} |
+| **4. RUL Prediction (131-Feat XGBoost)** | **{rul_size:.1f} KB** | 131 | **{rul_latency_ms:.3f} ms** | {rul_tier} |
+| **FULL 4-MODEL PIPELINE TOTAL** | **{anomaly_size+degradation_size+fault_size+rul_size:.1f} KB** | — | **{total_latency_ms:.3f} ms** | **{pipeline_verdict}** |
 
 ---
 
 ## 3. Onboard Edge vs Ground Station Split Architecture
 
 ### Onboard Edge Flight Computer (Tier 1 Execution)
-- **Models**: Anomaly Detection (Isolation Forest) & First-Principles Physics Model.
-- **Latency Requirement**: < 2.0 ms per sample (executing at 10Hz - 50Hz).
-- **Footprint**: Extremely lightweight ({anomaly_size:.1f} KB memory footprint), suitable for ARM Cortex-M7 / ARM Cortex-A53 / Raspberry Pi flight control boards.
+- **Models**: High-speed lightweight models satisfying onboard latency budgets (< 2.0 ms).
+- **Footprint**: Small memory footprint (suitable for ARM Cortex-M7 / ARM Cortex-A53 flight control hardware).
 - **Role**: Immediate cockpit warning, emergency Return-To-Base (RTB) triggers, and zero-latency safety enforcement.
 
 ### Ground Control Station (GCS) & Cloud Analytics (Tier 2 Execution)
-- **Models**: 131-Feature XGBoost RUL Predictor & SHAP TreeExplainer XAI Engine.
-- **Latency Requirement**: < 50 ms per sample.
+- **Models**: Heavy predictive maintenance models, 131-Feature XGBoost RUL Predictor & SHAP TreeExplainer XAI Engine.
+- **Latency Requirement**: < 50.0 ms per sample.
 - **Role**: Heavy predictive maintenance, depot scheduling, multi-sensor SHAP attribution, and long-term fleet health tracking.
 """
 
@@ -138,9 +167,7 @@ This report evaluates the computational efficiency, memory footprint, and single
     report_path = os.path.join(docs_dir, "EDGE_AI_BENCHMARK.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
-    with open(os.path.abspath("EDGE_AI_BENCHMARK.md"), "w", encoding="utf-8") as f:
-        f.write(report_content)
-    logger.info(f"Saved Edge AI Benchmark Report to: {report_path}")
+    logger.info(f"Saved Edge AI Benchmark Report cleanly to: {report_path}")
 
 if __name__ == "__main__":
     main()

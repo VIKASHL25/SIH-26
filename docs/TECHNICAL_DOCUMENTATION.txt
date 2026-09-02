@@ -16,8 +16,8 @@ The Medium-Altitude Long-Endurance (MALE) UAV Aero Piston Engine Digital Twin is
 3. DEFENSE AI/ML MODEL SUITE
   1. Isolation Forest: Anomaly Detection
   2. XGBoost Regressor: Engine Degradation Index & Health %
-  3. Multiclass XGBoost: Fault Classifier (5 classes)
-  4. XGBoost & ExtraTrees: RUL Prediction (131 features, 90% Confidence Interval UQ)
+  3. Multiclass XGBoost: Fault Classifier (6 classes: injector_degradation, lubrication_degradation, misfire, normal, overheating, sensor_fault)
+  4. XGBoost Regressor (131 features, with post-processing: degradation-aware anchoring, exponential smoothing, slew-rate limiting, and quantile-sampling-based uncertainty quantification for P10-P90 confidence intervals): RUL Prediction
 
 4. DEFENSE-IN-DEPTH SECURITY FRAMEWORK
   1. Service-to-Service Auth (X-Internal-Key)

@@ -18,6 +18,20 @@ Medium-Altitude Long-Endurance (MALE) Unmanned Aerial Vehicles (UAVs)—such as 
 
 The **MALE UAV Aero Piston Engine Digital Twin Framework** provides a real-time, physics-informed, AI-powered health monitoring and predictive maintenance ecosystem. It models thermodynamic engine behavior, processes high-frequency engine sensor telemetry through standardized CAN bus protocols, runs four synchronized machine learning inference models, attributes root causes using Explainable AI (SHAP & Counterfactual Sensitivity), and streams live mission health metrics to Ground Control Station (GCS) dashboards while archiving complete mission trajectories to MongoDB Atlas.
 
+---
+
+## 📚 Canonical Documentation Index
+
+All project documentation, benchmarks, security policies, and technical roadmaps are consolidated in the [`docs/`](docs/) directory:
+
+- **[Security Architecture & Policy](docs/SECURITY.md)**: 5-layer Defense-in-Depth security framework, inter-service authentication, and model SHA-256 fingerprinting.
+- **[Edge AI Benchmarking Report](docs/EDGE_AI_BENCHMARK.md)**: Model artifact sizes (KB), CPU single-core latency (ms), and Onboard vs. GCS split architecture.
+- **[Federated Learning (FedAvg) PoC](docs/FEDERATED_LEARNING.md)**: Multi-UAV fleet parameter weight averaging and zero telemetry sharing privacy proof.
+- **[Technical Documentation](docs/TECHNICAL_DOCUMENTATION.txt)** ([Word .docx](docs/TECHNICAL_DOCUMENTATION.docx)): Full microservices topology and model specifications.
+- **[Deployment Roadmap](docs/DEPLOYMENT_ROADMAP.txt)** ([Word .docx](docs/DEPLOYMENT_ROADMAP.docx)): Phased enterprise defense transition plan.
+
+---
+
 ```
                                   +---------------------------------------+
                                   |    MALE UAV Aero Piston Engine        |
