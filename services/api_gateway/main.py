@@ -356,12 +356,12 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             while True:
-                t_res = await client.post(f"{TELEMETRY_SERVICE_URL}/step")
+                t_res = await client.post(f"{TELEMETRY_SERVICE_URL}/step", headers=INTERNAL_HEADERS)
                 
                 if t_res.status_code == 200:
                     payload = t_res.json()
-                    sim_state = payload.get("simulation_state", "PAUSED")
-                    speed = payload.get("simulation_speed", 1.0)
+                    sim_state = payload.get("playback_state") or payload.get("simulation_state", "PAUSED")
+                    speed = payload.get("playback_speed") or payload.get("simulation_speed", 1.0)
                     delay_s = max(0.1, 1.0 / max(0.1, float(speed)))
 
                     if sim_state == "RUNNING":
