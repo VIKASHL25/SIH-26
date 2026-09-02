@@ -324,6 +324,7 @@ class MissionSimulationEngine:
             "degradation_estimation": predictions["degradation_estimation"],
             "fault_classification": predictions["fault_classification"],
             "rul_prediction": predictions["rul_prediction"],
+            "model_metadata": predictions.get("metadata", {}),
             "advisories": advisories,
             "xai": xai_payload
         }

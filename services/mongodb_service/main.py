@@ -1,12 +1,17 @@
 import os
 import sys
+
+# Add project root to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from pydantic import BaseModel
 from pymongo import MongoClient, DESCENDING
 from dotenv import load_dotenv
+from backend.security import verify_internal_key
 
 # Load environment variables from .env file
 load_dotenv()
@@ -127,7 +132,7 @@ def get_health():
         "atlas_connected": is_connected
     }
 
-@app.post("/log_telemetry")
+@app.post("/log_telemetry", dependencies=[Depends(verify_internal_key)])
 def log_telemetry(data: TelemetryLogReq):
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
@@ -147,7 +152,7 @@ def log_telemetry(data: TelemetryLogReq):
         logger.error(f"Error logging telemetry to MongoDB: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/mission_replay/{mission_id}")
+@app.get("/mission_replay/{mission_id}", dependencies=[Depends(verify_internal_key)])
 def get_mission_replay(mission_id: int, limit: int = Query(2000, le=10000)):
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
@@ -167,7 +172,7 @@ def get_mission_replay(mission_id: int, limit: int = Query(2000, le=10000)):
         "frames": frames
     }
 
-@app.get("/list_saved_missions")
+@app.get("/list_saved_missions", dependencies=[Depends(verify_internal_key)])
 def list_saved_missions():
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
@@ -175,7 +180,7 @@ def list_saved_missions():
     missions = db["mission_telemetry_logs"].distinct("mission_id")
     return {"recorded_missions": sorted(missions)}
 
-@app.post("/log_summary")
+@app.post("/log_summary", dependencies=[Depends(verify_internal_key)])
 def log_mission_summary(data: MissionSummaryReq):
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
@@ -188,7 +193,7 @@ def log_mission_summary(data: MissionSummaryReq):
     )
     return {"status": "SUCCESS", "mission_id": data.mission_id}
 
-@app.post("/log_advisory")
+@app.post("/log_advisory", dependencies=[Depends(verify_internal_key)])
 def log_advisory(data: AdvisoryLogReq):
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
@@ -198,7 +203,7 @@ def log_advisory(data: AdvisoryLogReq):
     db["advisory_history"].insert_one(doc)
     return {"status": "SUCCESS"}
 
-@app.get("/get_advisories")
+@app.get("/get_advisories", dependencies=[Depends(verify_internal_key)])
 def get_advisories(mission_id: Optional[int] = None, limit: int = 100):
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
@@ -207,7 +212,7 @@ def get_advisories(mission_id: Optional[int] = None, limit: int = 100):
     cursor = db["advisory_history"].find(query, {"_id": 0}).sort("timestamp", DESCENDING).limit(limit)
     return {"advisories": list(cursor)}
 
-@app.get("/get_fleet_metadata")
+@app.get("/get_fleet_metadata", dependencies=[Depends(verify_internal_key)])
 def get_fleet_metadata():
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection unavailable")

@@ -1,13 +1,14 @@
 import os
 import sys
-import logging
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+import logging
+from typing import Dict, Any, Optional
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+from backend.security import verify_internal_key
 from explainability.xai_engine import DigitalTwinXAIEngine
 from backend.model_loader import DigitalTwinModelManager
 
@@ -29,31 +30,33 @@ def startup_event():
     global xai_engine
     try:
         model_manager.load_all_models()
-        xai_engine = DigitalTwinXAIEngine(model_manager)
+        xai_engine = DigitalTwinXAIEngine()
+        xai_engine.initialize(model_manager)
         logger.info("DigitalTwinXAIEngine initialized in XAI Microservice.")
     except Exception as e:
         logger.error(f"XAI initialization error: {e}")
 
 class ExplainReq(BaseModel):
-    clean_sample: Dict[str, Any]
+    feature_vectors: Dict[str, Any]
     predictions: Dict[str, Any]
 
 @app.get("/health")
 def get_health():
     return {
         "service": "XAI & Advisory Microservice",
-        "status": "HEALTHY" if xai_engine is not None else "INITIALIZING"
+        "status": "HEALTHY" if xai_engine is not None and xai_engine._initialized else "INITIALIZING"
     }
 
-@app.post("/explain")
+@app.post("/explain", dependencies=[Depends(verify_internal_key)])
 def explain_diagnostic(req: ExplainReq):
     if xai_engine is None:
         raise HTTPException(status_code=500, detail="XAI Engine not initialized")
     
     try:
-        explanation = xai_engine.explain_diagnostic(
-            clean_sample=req.clean_sample,
-            predictions=req.predictions
+        explanation = xai_engine.explain(
+            feature_vectors=req.feature_vectors,
+            predictions=req.predictions,
+            model_manager=model_manager
         )
         return explanation
     except Exception as e:

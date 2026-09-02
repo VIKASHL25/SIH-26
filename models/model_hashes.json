@@ -1,0 +1,6 @@
+{
+  "anomaly_detection": "ac99938794d2fee7b5c0d7f861e147cb0dc67561f8e6b55ee52fa03eb9fe323c",
+  "degradation_estimation": "91f802a02f1a362ef7ababf3094ecaa9f16cd84dcc7f8cf556177ed3b5c9136b",
+  "fault_classification": "8ce863f828d78ac3e939ef1d66ad7b377c472fa12ea90cd592ed622e849a64f4",
+  "rul_prediction": "3b3736669278d54c9e7c4a81b2bae064a83e79aab7e7b69b4f150998dc0e2a80"
+}

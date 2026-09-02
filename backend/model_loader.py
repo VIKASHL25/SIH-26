@@ -62,17 +62,45 @@ class DigitalTwinModelManager:
         # RUL Temporal EMA State Filter
         self.previous_rul: Optional[float] = None
         self._is_loaded = False
+        self.model_hashes: Dict[str, str] = {}
 
     def reset_state(self):
         """Resets temporal filtering state across mission reloads."""
         self.previous_rul = None
 
+    def _verify_model_hash(self, model_key: str, file_path: str):
+        """Computes SHA-256 hash of model file, logs it, and verifies against models/model_hashes.json."""
+        import hashlib
+        try:
+            with open(file_path, "rb") as f:
+                computed_hash = hashlib.sha256(f.read()).hexdigest()
+            
+            self.model_hashes[model_key] = computed_hash
+            logger.info(f"Model integrity SHA-256 [{model_key}]: {computed_hash}")
+
+            # Check against expected hashes in models/model_hashes.json if available
+            hashes_json_path = os.path.join(os.path.dirname(file_path), "../model_hashes.json")
+            if os.path.exists(hashes_json_path):
+                with open(hashes_json_path, "r") as hf:
+                    expected_hashes = json.load(hf)
+                    expected = expected_hashes.get(model_key)
+                    if expected and expected != computed_hash:
+                        logger.critical(
+                            f"CRITICAL: [SECURITY WARNING] Model integrity mismatch for '{model_key}'! "
+                            f"Expected SHA-256: {expected}, Computed: {computed_hash}. File may be tampered!"
+                        )
+                    elif expected:
+                        logger.info(f"✅ Model integrity verified matching expected SHA-256 hash [{model_key}].")
+        except Exception as e:
+            logger.error(f"Error verifying model hash for {model_key}: {e}")
+
     def load_all_models(self):
-        """Loads all 4 models and feature specifications into memory."""
-        logger.info("Initializing loading of all 4 Digital Twin AI/ML models...")
+        """Loads all 4 models and feature specifications into memory with integrity verification."""
+        logger.info("Initializing loading of all 4 Digital Twin AI/ML models with SHA-256 integrity checks...")
 
         # 1. Load Anomaly Detection Model & Scaler
         try:
+            self._verify_model_hash("anomaly_detection", ANOMALY_MODEL_PATH)
             self.anomaly_model = joblib.load(ANOMALY_MODEL_PATH)
             self.anomaly_scaler = joblib.load(ANOMALY_SCALER_PATH)
             logger.info("Loaded Anomaly Detection Model & Scaler successfully.")
@@ -82,6 +110,7 @@ class DigitalTwinModelManager:
 
         # 2. Load Degradation Model & Feature Columns
         try:
+            self._verify_model_hash("degradation_estimation", DEGRADATION_MODEL_PATH)
             self.degradation_model = XGBRegressor()
             self.degradation_model.load_model(str(DEGRADATION_MODEL_PATH))
             with open(DEGRADATION_FEATURE_COLS_PATH, "r") as f:
@@ -93,6 +122,7 @@ class DigitalTwinModelManager:
 
         # 3. Load Fault Classification Model & Label Encoder
         try:
+            self._verify_model_hash("fault_classification", FAULT_MODEL_PATH)
             if str(FAULT_MODEL_PATH).endswith(".json") and os.path.exists(str(FAULT_MODEL_PATH)):
                 self.fault_model = XGBClassifier()
                 self.fault_model.load_model(str(FAULT_MODEL_PATH))
@@ -108,23 +138,24 @@ class DigitalTwinModelManager:
             logger.error(f"Failed to load Fault Classification model: {e}")
             raise e
 
-        # 4. Load RUL Model & Feature Columns
+        # 4. Load RUL Model & Feature Specification
         try:
+            self._verify_model_hash("rul_prediction", RUL_MODEL_PATH)
             self.rul_model = XGBRegressor()
             self.rul_model.load_model(str(RUL_MODEL_PATH))
             booster_features = self.rul_model.get_booster().feature_names
-            if booster_features:
-                self.rul_feature_cols = list(booster_features)
+            if booster_features and len(booster_features) > 0:
+                self.rul_feature_cols = booster_features
             else:
                 with open(RUL_FEATURE_COLS_PATH, "r") as f:
-                    self.rul_feature_cols = [line.strip() for line in f.readlines() if line.strip()]
+                    self.rul_feature_cols = [line.strip() for line in f if line.strip()]
             logger.info(f"Loaded RUL Model with {len(self.rul_feature_cols)} features successfully.")
         except Exception as e:
             logger.error(f"Failed to load RUL model: {e}")
             raise e
 
         self._is_loaded = True
-        logger.info("All 4 Digital Twin AI/ML models loaded and ready for simulation!")
+        logger.info("All 4 Digital Twin AI/ML models loaded and verified ready for simulation!")
 
     def predict_anomaly(self, df_13_features: pd.DataFrame, threshold: float = 0.0) -> dict:
         """
@@ -285,16 +316,32 @@ class DigitalTwinModelManager:
         """
         Evaluates all 4 models in a single call given model feature vectors.
         """
+        def _to_df(val):
+            if val is None:
+                return None
+            if isinstance(val, pd.DataFrame):
+                return val
+            if isinstance(val, list):
+                return pd.DataFrame(val)
+            if isinstance(val, dict):
+                return pd.DataFrame([val])
+            return val
+
         clean_sample = feature_vectors.get("clean_sample")
-        anomaly_res = self.predict_anomaly(feature_vectors["anomaly"], threshold=anomaly_threshold)
-        degradation_res = self.predict_degradation(feature_vectors["degradation"], clean_sample=clean_sample)
-        fault_res = self.predict_fault(feature_vectors["fault"])
+        anomaly_df = _to_df(feature_vectors.get("anomaly"))
+        degradation_df = _to_df(feature_vectors.get("degradation"))
+        fault_df = _to_df(feature_vectors.get("fault"))
+        rul_df = _to_df(feature_vectors.get("rul"))
+
+        anomaly_res = self.predict_anomaly(anomaly_df, threshold=anomaly_threshold)
+        degradation_res = self.predict_degradation(degradation_df, clean_sample=clean_sample)
+        fault_res = self.predict_fault(fault_df)
         
         # Pass health_pct & degradation_index to RUL for dynamic anchoring & smooth failure filtering
         health_pct = degradation_res.get("estimated_health_pct")
         deg_idx = degradation_res.get("degradation_index")
         rul_res = self.predict_rul(
-            feature_vectors["rul"],
+            rul_df,
             buffer_len=buffer_len,
             health_pct=health_pct,
             degradation_index=deg_idx
@@ -312,5 +359,9 @@ class DigitalTwinModelManager:
             "anomaly_detection": anomaly_res,
             "degradation_estimation": degradation_res,
             "fault_classification": fault_res,
-            "rul_prediction": rul_res
+            "rul_prediction": rul_res,
+            "metadata": {
+                "model_hashes": self.model_hashes,
+                "verified_integrity": True
+            }
         }

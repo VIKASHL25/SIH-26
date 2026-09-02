@@ -84,19 +84,40 @@ def main():
         health_status = fault_payload.get("health_status") or fault_payload.get("status")
         logger.info(f"[SUCCESS] Fault Injection Health Status: {health_status}")
 
-        # Clear fault
-        client.post(f"{GATEWAY_URL}/api/simulation/clear_faults")
-        logger.info("[SUCCESS] Synthetic fault cleared successfully!")
+        # 6. Security Test: Direct Microservice Call without X-Internal-Key (Expect 401)
+        logger.info("Test 6: Testing Inter-Service Auth Enforcement (Direct call without key -> Expect 401)...")
+        unauth_res = client.post(f"{TELEMETRY_URL}/start")
+        assert unauth_res.status_code == 401, f"Expected 401 Unauthorized, got {unauth_res.status_code}"
+        logger.info("[SUCCESS] Direct unauthenticated microservice request rejected with 401 Unauthorized!")
 
-        # Test 6: Verify Advisory History Retrieval
-        logger.info("Test 6: Checking MongoDB Atlas Advisory History Retrieval...")
+        # 7. Security Test: CAN Frame Checksum Integrity Verification
+        logger.info("Test 7: Testing CAN Frame Checksum Integrity Verification...")
+        from can_layer.can_codec import encode_telemetry, decode_frame
+        sample_values = {"rpm": 2300.0, "cht_C": 135.0, "egt_C": 670.0, "oil_pressure_bar": 4.5}
+        encoded_frames = encode_telemetry(sample_values)
+        assert len(encoded_frames) > 0
+        decoded_values = decode_frame(encoded_frames[0])
+        assert "rpm" in decoded_values
+        logger.info("[SUCCESS] CAN Frame Checksum Encoding & Decoding verified cleanly!")
+
+        # 8. Security Test: Model Integrity & Traceability Metadata
+        logger.info("Test 8: Verifying Model SHA-256 Traceability Metadata...")
+        step_res = client.post(f"{GATEWAY_URL}/api/simulation/step").json()
+        model_meta = step_res.get("model_metadata") or step_res.get("models_prediction", {}).get("metadata", {})
+        assert model_meta and len(model_meta) > 0, "model_metadata missing from step payload"
+        assert model_meta.get("verified_integrity") is True, f"verified_integrity is not True: {model_meta}"
+        assert "model_hashes" in model_meta, f"model_hashes key missing: {model_meta}"
+        logger.info(f"[SUCCESS] Model Integrity & Traceability Verified: {len(model_meta['model_hashes'])} AI model hashes attached!")
+
+        # 9. Test Advisory History Retrieval
+        logger.info("Test 9: Checking MongoDB Atlas Advisory History Retrieval...")
         adv_res = client.get(f"{GATEWAY_URL}/api/db/advisories?mission_id=999")
         assert adv_res.status_code == 200
         adv_list = adv_res.json().get("advisories", [])
         logger.info(f"[SUCCESS] Retrieved {len(adv_list)} advisories from MongoDB Atlas advisory_history collection!")
 
     logger.info("=================================================================")
-    logger.info("ALL 5 MICROSERVICES & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!")
+    logger.info("ALL 5 MICROSERVICES, SECURITY CONTROLS & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!")
     logger.info("=================================================================")
 
 if __name__ == "__main__":

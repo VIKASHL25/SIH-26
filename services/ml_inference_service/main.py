@@ -1,13 +1,14 @@
 import os
 import sys
-import logging
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+import logging
+from typing import Dict, Any, Optional
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+from backend.security import verify_internal_key
 from backend.model_loader import DigitalTwinModelManager
 
 logging.basicConfig(level=logging.INFO)
@@ -40,10 +41,11 @@ def get_health():
     return {
         "service": "AI/ML Inference Microservice",
         "status": "HEALTHY" if model_manager._is_loaded else "INITIALIZING",
-        "models_loaded": model_manager._is_loaded
+        "models_loaded": model_manager._is_loaded,
+        "model_hashes": model_manager.model_hashes
     }
 
-@app.post("/predict_all")
+@app.post("/predict_all", dependencies=[Depends(verify_internal_key)])
 def predict_all(payload: FeatureVectorsPayload):
     if not model_manager._is_loaded:
         raise HTTPException(status_code=500, detail="Models not loaded")
@@ -59,7 +61,7 @@ def predict_all(payload: FeatureVectorsPayload):
         logger.error(f"Inference error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/reset_state")
+@app.post("/reset_state", dependencies=[Depends(verify_internal_key)])
 def reset_state():
     model_manager.reset_state()
     return {"message": "RUL temporal filter state reset"}

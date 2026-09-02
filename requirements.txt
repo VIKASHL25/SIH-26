@@ -6,6 +6,9 @@ websockets>=11.0
 httpx>=0.24.0
 python-dotenv>=1.0.0
 
+# Security & Cryptography
+cryptography>=41.0.0
+
 # Scientific Computing & Data Processing
 numpy>=1.24.0
 pandas>=2.0.0

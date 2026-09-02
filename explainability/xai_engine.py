@@ -75,10 +75,26 @@ class DigitalTwinXAIEngine:
 
         clean_sample = feature_vectors.get("clean_sample", {})
 
+        def _to_df(val):
+            if val is None:
+                return None
+            if isinstance(val, pd.DataFrame):
+                return val
+            if isinstance(val, list):
+                return pd.DataFrame(val)
+            if isinstance(val, dict):
+                return pd.DataFrame([val])
+            return val
+
+        anomaly_df = _to_df(feature_vectors.get("anomaly"))
+        degradation_df = _to_df(feature_vectors.get("degradation"))
+        fault_df = _to_df(feature_vectors.get("fault"))
+        rul_df = _to_df(feature_vectors.get("rul"))
+
         # 1. Anomaly Model Explanation
         anomaly_res = predictions.get("anomaly_detection", {})
         anomaly_explanation = self.anomaly_explainer.explain(
-            df_13_features=feature_vectors["anomaly"],
+            df_13_features=anomaly_df,
             anomaly_model=model_manager.anomaly_model,
             anomaly_scaler=model_manager.anomaly_scaler,
             feature_cols=model_manager.anomaly_feature_cols,
@@ -89,7 +105,7 @@ class DigitalTwinXAIEngine:
         # 2. Fault Model Explanation
         fault_res = predictions.get("fault_classification", {})
         fault_explanation = self.tree_explainer.explain_fault(
-            df_55_features=feature_vectors["fault"],
+            df_55_features=fault_df,
             model_manager=model_manager,
             prediction_result=fault_res,
             top_n=top_n
@@ -98,7 +114,7 @@ class DigitalTwinXAIEngine:
         # 3. Degradation Model Explanation
         deg_res = predictions.get("degradation_estimation", {})
         degradation_explanation = self.tree_explainer.explain_degradation(
-            df_120_features=feature_vectors["degradation"],
+            df_120_features=degradation_df,
             model_manager=model_manager,
             clean_sample=clean_sample,
             prediction_result=deg_res,
@@ -108,7 +124,7 @@ class DigitalTwinXAIEngine:
         # 4. RUL Model Explanation
         rul_res = predictions.get("rul_prediction", {})
         rul_explanation = self.tree_explainer.explain_rul(
-            df_60_features=feature_vectors.get("rul"),
+            df_60_features=rul_df,
             model_manager=model_manager,
             prediction_result=rul_res,
             top_n=top_n

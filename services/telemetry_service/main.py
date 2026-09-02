@@ -1,13 +1,14 @@
 import os
 import sys
-import logging
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+import logging
+from typing import Dict, Any, Optional
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+from backend.security import verify_internal_key
 from backend.simulation_engine import MissionSimulationEngine
 
 logging.basicConfig(level=logging.INFO)
@@ -52,14 +53,14 @@ def get_health():
         "active_speed": sim_engine.speed
     }
 
-@app.get("/missions")
+@app.get("/missions", dependencies=[Depends(verify_internal_key)])
 def list_missions():
     return {
         "available_mission_ids": sim_engine.get_available_missions(),
         "active_mission_id": sim_engine.active_mission_id
     }
 
-@app.post("/load_mission")
+@app.post("/load_mission", dependencies=[Depends(verify_internal_key)])
 def load_mission(req: LoadMissionReq):
     try:
         sim_engine.load_mission(req.mission_id)
@@ -71,17 +72,17 @@ def load_mission(req: LoadMissionReq):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/start")
+@app.post("/start", dependencies=[Depends(verify_internal_key)])
 def start_simulation():
     sim_engine.set_state("RUNNING")
     return {"message": "Simulation started", "state": sim_engine.state}
 
-@app.post("/pause")
+@app.post("/pause", dependencies=[Depends(verify_internal_key)])
 def pause_simulation():
     sim_engine.set_state("PAUSED")
     return {"message": "Simulation paused", "state": sim_engine.state}
 
-@app.post("/step")
+@app.post("/step", dependencies=[Depends(verify_internal_key)])
 def step_simulation():
     if sim_engine.mission_df is None:
         raise HTTPException(status_code=400, detail="No active mission loaded")
@@ -89,24 +90,25 @@ def step_simulation():
     payload = sim_engine.step()
     if payload is None:
         raise HTTPException(status_code=400, detail="End of mission reached")
+    
     return payload
 
-@app.post("/speed")
+@app.post("/speed", dependencies=[Depends(verify_internal_key)])
 def set_speed(req: SpeedReq):
     sim_engine.set_speed(req.speed)
     return {"message": f"Speed set to {sim_engine.speed}x", "speed": sim_engine.speed}
 
-@app.post("/seek")
+@app.post("/seek", dependencies=[Depends(verify_internal_key)])
 def seek_frame(req: SeekReq):
     sim_engine.seek(req.frame_idx)
     return {"message": f"Seeked to frame {sim_engine.current_frame_idx}", "frame_index": sim_engine.current_frame_idx}
 
-@app.post("/inject_fault")
+@app.post("/inject_fault", dependencies=[Depends(verify_internal_key)])
 def inject_fault(req: FaultInjectReq):
     sim_engine.set_fault_injection(req.overrides)
     return {"message": "Synthetic fault parameters injected", "active_overrides": sim_engine.fault_overrides}
 
-@app.post("/clear_faults")
+@app.post("/clear_faults", dependencies=[Depends(verify_internal_key)])
 def clear_faults():
     sim_engine.clear_fault_injection()
     return {"message": "Fault injection cleared"}
