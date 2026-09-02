@@ -1,0 +1,27 @@
+================================================================================
+MALE UAV AERO PISTON ENGINE DIGITAL TWIN — TECHNICAL DOCUMENTATION
+DRDO / SIH Defense Hackathon Project Architecture & Security Specifications
+================================================================================
+
+1. EXECUTIVE SUMMARY
+The Medium-Altitude Long-Endurance (MALE) UAV Aero Piston Engine Digital Twin is a defense-grade, 5-service FastAPI microservices platform designed for real-time telemetry monitoring, predictive maintenance, physics-informed anomaly detection, and explainable AI (XAI) diagnostics.
+
+2. SYSTEM ARCHITECTURE & MICROSERVICES TOPOLOGY
+  - API Gateway (Port 8000): Ingress proxy, WebSocket stream (/ws/telemetry), Rate Limiting.
+  - Telemetry Service (Port 8001): Mission simulation engine, CAN bus parser, 131 feature engineering, Scenario Simulator.
+  - ML Inference Service (Port 8002): Anomaly, Degradation, Fault, RUL models with SHA-256 verification.
+  - XAI & Advisory Service (Port 8003): SHAP TreeExplainer, top diagnostic drivers, advisories.
+  - MongoDB Atlas Service (Port 8004): Async MongoDB cloud persistence proxy.
+
+3. DEFENSE AI/ML MODEL SUITE
+  1. Isolation Forest: Anomaly Detection
+  2. XGBoost Regressor: Engine Degradation Index & Health %
+  3. Multiclass XGBoost: Fault Classifier (5 classes)
+  4. XGBoost & ExtraTrees: RUL Prediction (131 features, 90% Confidence Interval UQ)
+
+4. DEFENSE-IN-DEPTH SECURITY FRAMEWORK
+  1. Service-to-Service Auth (X-Internal-Key)
+  2. API Gateway Rate Limiting (60 req/min)
+  3. CAN Bus Frame Checksum Integrity (1-byte XOR)
+  4. SHA-256 AI Model Fingerprinting & Hash Verification
+  5. Transport Layer Security (TLS 1.3 / HTTPS / WSS)

@@ -1,0 +1,34 @@
+================================================================================
+MALE UAV AERO PISTON ENGINE DIGITAL TWIN — PRODUCTION DEPLOYMENT ROADMAP
+Phased Enterprise & Defense Transition Plan (DRDO / SIH Standards)
+================================================================================
+
+1. EXECUTIVE SUMMARY
+This roadmap defines the structured engineering transition from the current hackathon MVP baseline to a fully certified, air-gapped, defense-grade digital twin platform for MALE UAV operations.
+
+2. PHASED TIMELINE & MILESTONES
+
+[PHASE 1: HACKATHON MVP BASELINE — COMPLETED]
+  - 5 microservices operational (Ports 8000-8004)
+  - MongoDB Atlas cloud integration & mission replay
+  - SHA-256 model hash integrity & 131-feature RUL alignment
+  - Defense-in-depth security layer (X-Internal-Key, rate limiter, CAN XOR checksums)
+  - Scenario simulator (/api/simulation/scenario) & vibration/coking advisories
+
+[PHASE 2: ENTERPRISE CONTAINERIZATION & RBAC — 0 to 3 MONTHS]
+  - Docker & Kubernetes Helm charts for all 5 services
+  - OAuth2 / JWT Role-Based Access Control (Pilot vs Tech vs Admin)
+  - Prometheus + Grafana real-time monitoring dashboard
+  - GitHub Actions CI/CD automated deployment pipeline
+
+[PHASE 3: HARDWARE-IN-THE-LOOP & AUTOSAR SecOC — 3 to 9 MONTHS]
+  - Peak-CAN / Vector physical SocketCAN hardware interface
+  - AUTOSAR SecOC (Secure On-Board Communication) for CAN-FD frames
+  - Mutual TLS (mTLS) with X.509 client certificates between microservices
+  - Air-gapped local MongoDB Enterprise cluster for classified environments
+
+[PHASE 4: FLIGHT COMPUTER QUANTIZATION & MIL-STD CERTIFICATION — 9 to 18 MONTHS]
+  - TPM 2.0 / HSM Hardware Security Module key storage
+  - TensorRT / ONNX Runtime AI model quantization for airborne flight computers
+  - Deep Learning CAN Bus Intrusion Detection System (BIDS)
+  - DRDO / MIL-STD-810H environmental & software reliability certification

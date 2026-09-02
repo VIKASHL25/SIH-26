@@ -89,9 +89,10 @@ class MissionSimulationEngine:
             channel="engine_backend",
         )
 
-        # Fault Injection Overrides
+        # Fault Injection Overrides & Vibration Baseline Buffer
         self.fault_overrides: Dict[str, float] = {}
         self.env_overrides: Dict[str, float] = {}
+        self.vibration_history: List[float] = []
 
     def initialize(self):
         """Loads dataset, models, and XAI explainers."""
@@ -406,12 +407,47 @@ class MissionSimulationEngine:
                 logger.warning(msg)
             self.last_alert_levels["RUL_LOW"] = rul_state
 
+        # 5. VIBRATION ROLLING BASELINE Alert State (Mean +/- 3*Std)
+        vib_val = clean_sample.get("vibration_rms", 0.0)
+        self.vibration_history.append(vib_val)
+        if len(self.vibration_history) > 30:
+            self.vibration_history.pop(0)
+
+        if len(self.vibration_history) >= 10:
+            vib_mean = float(np.mean(self.vibration_history[:-1]))
+            vib_std = float(np.std(self.vibration_history[:-1]))
+            is_vib_anomaly = (vib_val > vib_mean + 3.0 * max(0.1, vib_std)) or (vib_val > 2.8)
+        else:
+            is_vib_anomaly = vib_val > 2.8
+
+        vib_state = is_vib_anomaly
+        if vib_state != self.last_alert_levels.get("VIBRATION_ANOMALY"):
+            if vib_state:
+                msg = "WARNING: Abnormal vibration pattern detected (Combustion Instability / Mechanical Fluctuation). Inspect cylinder balancing & crankshaft mounts."
+                advisories.append(msg)
+                logger.warning(msg)
+            self.last_alert_levels["VIBRATION_ANOMALY"] = vib_state
+
+        # 6. CARBON COKING / INJECTOR BUILDUP Alert State
+        cht_val = clean_sample.get("cht_C", 0.0)
+        ff_val = clean_sample.get("fuel_flow_kg_s", 0.0)
+        egt_val = clean_sample.get("egt_C", 0.0)
+        is_coking = (cht_val > 145.0 and ff_val < 0.0055 and egt_val > 670.0)
+        coking_state = is_coking
+        if coking_state != self.last_alert_levels.get("CARBON_COKING"):
+            if coking_state:
+                msg = "ADVISORY: Potential carbon coking / buildup detected on fuel injector tips & exhaust valves. Recommend thermal flush."
+                advisories.append(msg)
+                logger.info(msg)
+            self.last_alert_levels["CARBON_COKING"] = coking_state
+
         # Nominal State trigger when no active alert state exists
         has_active_alerts = any([
             self.last_alert_levels.get("ANOMALY"),
             self.last_alert_levels.get("FAULT", "normal") != "normal",
             self.last_alert_levels.get("DEGRADATION") in ["ELEVATED", "CRITICAL"],
-            self.last_alert_levels.get("RUL_LOW") == "LOW"
+            self.last_alert_levels.get("RUL_LOW") == "LOW",
+            self.last_alert_levels.get("VIBRATION_ANOMALY")
         ])
 
         if not advisories and not has_active_alerts:
@@ -422,3 +458,150 @@ class MissionSimulationEngine:
             self.last_alert_levels["SYSTEM_STATE"] = "ALERT"
 
         return advisories
+
+    def simulate_scenario(
+        self,
+        scenario_name: str = "high_altitude",
+        altitude_m: Optional[float] = None,
+        ambient_temp_C: Optional[float] = None,
+        throttle_profile: Optional[List[float]] = None,
+        duration_steps: int = 30
+    ) -> Dict[str, Any]:
+        """
+        Forward predictive simulator projecting hypothetical flight scenarios
+        across physics models, feature engineering, and the 4 AI models.
+        """
+        # Define Scenario Presets
+        presets = {
+            "high_altitude": {
+                "altitude_m": 5500.0,
+                "ambient_temp_C": -15.0,
+                "throttle_pct": 85.0,
+                "description": "High Altitude Operations (5,500m ASL, -15°C Ambient) — Reduced air density & MAP."
+            },
+            "endurance_mission": {
+                "altitude_m": 3000.0,
+                "ambient_temp_C": 15.0,
+                "throttle_pct": 65.0,
+                "description": "Endurance Flight (Long Duration Cruise) — Steady-state thermal load & degradation progression."
+            },
+            "hot_weather": {
+                "altitude_m": 500.0,
+                "ambient_temp_C": 45.0,
+                "throttle_pct": 75.0,
+                "description": "Hot Weather Operation (+45°C Ambient) — High thermal stress on CHT & EGT cooling bounds."
+            },
+            "rapid_throttle_transitions": {
+                "altitude_m": 1500.0,
+                "ambient_temp_C": 20.0,
+                "throttle_pct": 70.0,
+                "description": "Rapid Throttle Transitions — Dynamic power cycling (30% to 95% throttle)."
+            }
+        }
+
+        preset = presets.get(scenario_name.lower(), presets["high_altitude"])
+        target_alt = altitude_m if altitude_m is not None else preset["altitude_m"]
+        target_temp = ambient_temp_C if ambient_temp_C is not None else preset["ambient_temp_C"]
+        
+        if throttle_profile is None or len(throttle_profile) == 0:
+            if scenario_name.lower() == "rapid_throttle_transitions":
+                profile = [30.0 if (i % 6 < 3) else 95.0 for i in range(duration_steps)]
+            else:
+                profile = [preset["throttle_pct"]] * duration_steps
+        else:
+            profile = throttle_profile
+
+        duration_steps = min(200, max(5, len(profile)))
+
+        # Temporary engine state for simulation
+        sim_feature_engine = DigitalTwinFeatureEngine()
+        sim_model_manager = DigitalTwinModelManager()
+        sim_model_manager.load_all_models()
+
+        trajectory = []
+
+        for step_idx in range(duration_steps):
+            th_val = profile[min(step_idx, len(profile) - 1)]
+            
+            # Physics-informed telemetry projection based on environmental parameters
+            p_kPa = max(40.0, 101.325 * ((1.0 - 2.25577e-5 * target_alt) ** 5.25588))
+            rho_kg_m3 = p_kPa * 1000.0 / (287.05 * (target_temp + 273.15))
+            
+            rpm = 1200.0 + th_val * 16.5 + (0.01 * target_alt)
+            power_W = (th_val / 100.0) * 85000.0 * (rho_kg_m3 / 1.225)
+            torque_Nm = power_W / max(100.0, (rpm * 2.0 * np.pi / 60.0))
+            
+            cht_base = 70.0 + (th_val * 0.8) + (target_temp * 0.6)
+            egt_base = 400.0 + (th_val * 3.5) + (target_temp * 0.4)
+            oil_temp_base = 50.0 + (th_val * 0.4) + (target_temp * 0.3)
+            oil_press_base = max(1.5, 4.2 - (oil_temp_base - 70.0) * 0.02)
+            vib_base = 1.2 + (rpm / 3000.0) * 0.5
+
+            if scenario_name.lower() == "hot_weather":
+                cht_base += 20.0
+                egt_base += 30.0
+
+            raw_sample = {
+                "timestamp_s": step_idx * 1.0,
+                "engine_id": 99,
+                "mission_id": 888,
+                "mission_type": f"scenario_{scenario_name}",
+                "altitude_m": target_alt,
+                "ambient_temp_C": target_temp,
+                "pressure_kPa": p_kPa,
+                "air_density_kg_m3": rho_kg_m3,
+                "throttle_pct": th_val,
+                "load_pct": min(100.0, th_val * 0.95),
+                "rpm": rpm,
+                "air_mass_flow_kg_s": (rpm / 2500.0) * 0.12 * (rho_kg_m3 / 1.225),
+                "fuel_flow_kg_s": (power_W / 85000.0) * 0.007,
+                "torque_Nm": torque_Nm,
+                "power_W": power_W,
+                "cht_C": cht_base,
+                "egt_C": egt_base,
+                "oil_temperature_C": oil_temp_base,
+                "oil_pressure_bar": oil_press_base,
+                "vibration_rms": vib_base,
+                "battery_voltage_V": 28.0,
+                "alternator_current_A": 40.0,
+                "alternator_health": 1.0,
+                "injection_timing_deg": 25.0,
+                "expected_rpm": rpm * 0.99,
+                "expected_cht_C": cht_base * 0.98,
+                "expected_egt_C": egt_base * 0.98,
+            }
+
+            fv = sim_feature_engine.generate_all_feature_vectors(raw_sample, sim_model_manager)
+            preds = sim_model_manager.predict_all(fv, buffer_len=len(sim_feature_engine.buffer))
+
+            trajectory.append({
+                "step": step_idx,
+                "timestamp_s": step_idx,
+                "telemetry": {
+                    "rpm": round(rpm, 1),
+                    "throttle_pct": round(th_val, 1),
+                    "cht_C": round(cht_base, 1),
+                    "egt_C": round(egt_base, 1),
+                    "oil_pressure_bar": round(oil_press_base, 2),
+                    "vibration_rms": round(vib_base, 3),
+                    "altitude_m": round(target_alt, 1),
+                    "ambient_temp_C": round(target_temp, 1)
+                },
+                "health_status": preds["status"],
+                "predicted_health_pct": preds["degradation_estimation"]["estimated_health_pct"],
+                "predicted_fault": preds["fault_classification"]["predicted_fault"],
+                "predicted_rul_hours": preds["rul_prediction"].get("predicted_rul_hours")
+            })
+
+        return {
+            "scenario_name": scenario_name,
+            "description": preset.get("description", "Custom hypothetical mission profile simulation."),
+            "environmental_inputs": {
+                "altitude_m": target_alt,
+                "ambient_temp_C": target_temp,
+                "duration_steps": duration_steps
+            },
+            "total_steps": duration_steps,
+            "projected_trajectory": trajectory
+        }
+

@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from backend.security import verify_internal_key
@@ -42,6 +42,13 @@ class SeekReq(BaseModel):
 
 class FaultInjectReq(BaseModel):
     overrides: Dict[str, float]
+
+class ScenarioReq(BaseModel):
+    scenario_name: Optional[str] = "high_altitude"
+    altitude_m: Optional[float] = None
+    ambient_temp_C: Optional[float] = None
+    throttle_profile: Optional[List[float]] = None
+    duration_steps: Optional[int] = 30
 
 @app.get("/health")
 def get_health():
@@ -111,7 +118,22 @@ def inject_fault(req: FaultInjectReq):
 @app.post("/clear_faults", dependencies=[Depends(verify_internal_key)])
 def clear_faults():
     sim_engine.clear_fault_injection()
-    return {"message": "Fault injection cleared"}
+    return {"message": "Fault overrides cleared"}
+
+@app.post("/simulate/scenario", dependencies=[Depends(verify_internal_key)])
+def simulate_scenario(req: ScenarioReq):
+    try:
+        res = sim_engine.simulate_scenario(
+            scenario_name=req.scenario_name or "high_altitude",
+            altitude_m=req.altitude_m,
+            ambient_temp_C=req.ambient_temp_C,
+            throttle_profile=req.throttle_profile,
+            duration_steps=req.duration_steps or 30
+        )
+        return res
+    except Exception as e:
+        logger.error(f"Scenario simulation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

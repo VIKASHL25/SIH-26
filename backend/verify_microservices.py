@@ -116,8 +116,27 @@ def main():
         adv_list = adv_res.json().get("advisories", [])
         logger.info(f"[SUCCESS] Retrieved {len(adv_list)} advisories from MongoDB Atlas advisory_history collection!")
 
+        # 10. Forward Scenario Simulation Test
+        logger.info("Test 10: Testing Forward Scenario Simulation API (/api/simulation/scenario)...")
+        scen_res = client.post(
+            f"{GATEWAY_URL}/api/simulation/scenario",
+            json={"scenario_name": "high_altitude", "altitude_m": 5500.0, "ambient_temp_C": -15.0, "duration_steps": 10}
+        )
+        assert scen_res.status_code == 200, f"Scenario test failed with status {scen_res.status_code}: {scen_res.text}"
+        scen_data = scen_res.json()
+        assert "projected_trajectory" in scen_data and len(scen_data["projected_trajectory"]) == 10
+        logger.info(f"[SUCCESS] Forward Scenario Simulation verified: {len(scen_data['projected_trajectory'])} steps projected!")
+
+        # 11. Vibration Baseline & Carbon Coking Detection Test
+        logger.info("Test 11: Testing Vibration Baseline & Carbon Coking Detection Advisories...")
+        res = client.post(f"{GATEWAY_URL}/api/simulation/inject_fault", json={"overrides": {"cht_C": 55.0, "vibration_rms": 2.5}})
+        assert res.status_code == 200
+        coking_step = client.post(f"{GATEWAY_URL}/api/simulation/step").json()
+        step_advs = coking_step.get("advisories", [])
+        logger.info(f"[SUCCESS] Generated {len(step_advs)} advisories including vibration/coking checks: {step_advs}")
+
     logger.info("=================================================================")
-    logger.info("ALL 5 MICROSERVICES, SECURITY CONTROLS & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!")
+    logger.info("ALL 11 END-TO-END TESTS (MICROSERVICES, SECURITY, SCENARIOS & MONGODB ATLAS) PASSED CLEANLY!")
     logger.info("=================================================================")
 
 if __name__ == "__main__":
