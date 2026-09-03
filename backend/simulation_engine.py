@@ -191,8 +191,8 @@ class MissionSimulationEngine:
             self.can_adapter.close()
             self.can_adapter = None
 
-    def step(self) -> Optional[Dict[str, Any]]:
-        """Advances simulation by 1 tick and evaluates all 4 models."""
+    def step(self, advance: bool = True) -> Optional[Dict[str, Any]]:
+        """Advances simulation by 1 tick (if advance=True) and evaluates all 4 models."""
         if self.mission_df is None or self.mission_df.empty:
             return None
 
@@ -246,8 +246,9 @@ class MissionSimulationEngine:
             if key in self.mission_df.columns:
                 raw_row[key] = source_row[key]
 
-        # Advance frame index for next step
-        self.current_frame_idx += 1
+        # Advance frame index for next step only if advance is True
+        if advance:
+            self.current_frame_idx += 1
 
         # Process decoded CAN telemetry through the existing ML pipeline.
         fv = self.feature_engine.generate_all_feature_vectors(
@@ -331,6 +332,10 @@ class MissionSimulationEngine:
         }
 
         return payload
+
+    def get_current_frame(self) -> Optional[Dict[str, Any]]:
+        """Returns the current telemetry frame evaluated across models without advancing the frame index."""
+        return self.step(advance=False)
 
     def _generate_maintenance_advisories(self, predictions: dict, clean_sample: dict) -> List[str]:
         """
@@ -499,12 +504,22 @@ class MissionSimulationEngine:
             }
         }
 
-        preset = presets.get(scenario_name.lower(), presets["high_altitude"])
+        scenario_key = scenario_name.lower().replace("-", "_")
+        if "rapid" in scenario_key or "throttle" in scenario_key:
+            scenario_key = "rapid_throttle_transitions"
+        elif "alt" in scenario_key:
+            scenario_key = "high_altitude"
+        elif "hot" in scenario_key or "desert" in scenario_key:
+            scenario_key = "hot_weather"
+        elif "endurance" in scenario_key:
+            scenario_key = "endurance_mission"
+
+        preset = presets.get(scenario_key, presets["high_altitude"])
         target_alt = altitude_m if altitude_m is not None else preset["altitude_m"]
         target_temp = ambient_temp_C if ambient_temp_C is not None else preset["ambient_temp_C"]
         
         if throttle_profile is None or len(throttle_profile) == 0:
-            if scenario_name.lower() == "rapid_throttle_transitions":
+            if scenario_key == "rapid_throttle_transitions":
                 profile = [30.0 if (i % 6 < 3) else 95.0 for i in range(duration_steps)]
             else:
                 profile = [preset["throttle_pct"]] * duration_steps
@@ -513,10 +528,13 @@ class MissionSimulationEngine:
 
         duration_steps = min(200, max(5, len(profile)))
 
-        # Temporary engine state for simulation
+        # Temporary engine state for simulation — reuse preloaded model manager
         sim_feature_engine = DigitalTwinFeatureEngine()
-        sim_model_manager = DigitalTwinModelManager()
-        sim_model_manager.load_all_models()
+        if hasattr(self, "model_manager") and self.model_manager is not None and getattr(self.model_manager, "_is_loaded", False):
+            sim_model_manager = self.model_manager
+        else:
+            sim_model_manager = DigitalTwinModelManager()
+            sim_model_manager.load_all_models()
 
         trajectory = []
 
@@ -537,7 +555,7 @@ class MissionSimulationEngine:
             oil_press_base = max(1.5, 4.2 - (oil_temp_base - 70.0) * 0.02)
             vib_base = 1.2 + (rpm / 3000.0) * 0.5
 
-            if scenario_name.lower() == "hot_weather":
+            if scenario_key == "hot_weather":
                 cht_base += 20.0
                 egt_base += 30.0
 
@@ -575,7 +593,7 @@ class MissionSimulationEngine:
             preds = sim_model_manager.predict_all(fv, buffer_len=len(sim_feature_engine.buffer))
 
             trajectory.append({
-                "step": step_idx,
+                "step": step_idx + 1,
                 "timestamp_s": step_idx,
                 "telemetry": {
                     "rpm": round(rpm, 1),
@@ -593,6 +611,11 @@ class MissionSimulationEngine:
                 "predicted_rul_hours": preds["rul_prediction"].get("predicted_rul_hours")
             })
 
+        peak_cht = max([t["telemetry"]["cht_C"] for t in trajectory]) if trajectory else 0.0
+        peak_egt = max([t["telemetry"]["egt_C"] for t in trajectory]) if trajectory else 0.0
+        min_oil_p = min([t["telemetry"]["oil_pressure_bar"] for t in trajectory]) if trajectory else 0.0
+        final_health = trajectory[-1]["predicted_health_pct"] if trajectory else 100.0
+
         return {
             "scenario_name": scenario_name,
             "description": preset.get("description", "Custom hypothetical mission profile simulation."),
@@ -602,6 +625,13 @@ class MissionSimulationEngine:
                 "duration_steps": duration_steps
             },
             "total_steps": duration_steps,
-            "projected_trajectory": trajectory
+            "projected_trajectory": trajectory,
+            "summary": {
+                "peak_cht": round(peak_cht, 1),
+                "peak_egt": round(peak_egt, 1),
+                "min_oil_pressure_bar": round(min_oil_p, 2),
+                "final_health": round(final_health, 1),
+                "cooling_margin_status": "DEGRADED_MARGIN" if peak_cht > 155.0 else "ACCEPTABLE"
+            }
         }
 

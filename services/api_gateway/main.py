@@ -239,7 +239,7 @@ async def step_simulation(request: Request):
         raise HTTPException(status_code=429, detail="Too Many Requests: Rate limit exceeded for /api/simulation/step.")
 
     async with httpx.AsyncClient() as client:
-        t_res = await client.post(f"{TELEMETRY_SERVICE_URL}/step", headers=INTERNAL_HEADERS)
+        t_res = await client.post(f"{TELEMETRY_SERVICE_URL}/step?force=true", headers=INTERNAL_HEADERS)
         if t_res.status_code != 200:
             raise HTTPException(status_code=t_res.status_code, detail=t_res.text)
         payload = t_res.json()

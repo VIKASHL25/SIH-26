@@ -78,7 +78,7 @@ export const api = {
 
   // Scenario Simulation
   async simulateScenario(req: ScenarioRequest): Promise<any> {
-    const res = await apiClient.post('/api/simulation/scenario', req);
+    const res = await apiClient.post('/api/simulation/scenario', req, { timeout: 35000 });
     return res.data;
   },
 

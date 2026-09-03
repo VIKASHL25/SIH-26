@@ -90,11 +90,13 @@ def pause_simulation():
     return {"message": "Simulation paused", "state": sim_engine.state}
 
 @app.post("/step", dependencies=[Depends(verify_internal_key)])
-def step_simulation():
+def step_simulation(force: bool = False):
     if sim_engine.mission_df is None:
         raise HTTPException(status_code=400, detail="No active mission loaded")
     
-    payload = sim_engine.step()
+    # Only advance frame if simulation is RUNNING, or if explicitly forced by manual step
+    should_advance = (sim_engine.state == "RUNNING") or force
+    payload = sim_engine.step(advance=should_advance)
     if payload is None:
         raise HTTPException(status_code=400, detail="End of mission reached")
     

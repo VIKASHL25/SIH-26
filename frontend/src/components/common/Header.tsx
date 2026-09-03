@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { Radio, Shield, RotateCw, Play, Pause } from 'lucide-react';
 import { useDigitalTwinStore } from '../../store/useDigitalTwinStore';
+import { api } from '../../api/client';
 import { HealthBadge } from './HealthBadge';
 
 interface HeaderProps {
@@ -9,8 +10,22 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onReconnect }) => {
-  const { currentFrame, wsStatus, playbackState, selectedMissionId } = useDigitalTwinStore();
+  const { currentFrame, wsStatus, playbackState, selectedMissionId, setPlaybackState } = useDigitalTwinStore();
   const location = useLocation();
+
+  const handleTogglePlay = async () => {
+    try {
+      if (playbackState === 'RUNNING') {
+        setPlaybackState('PAUSED');
+        await api.pauseSimulation();
+      } else {
+        setPlaybackState('RUNNING');
+        await api.startSimulation();
+      }
+    } catch (err) {
+      console.error('Failed to toggle playback from header:', err);
+    }
+  };
 
   // UTC Clock
   const [utcTime, setUtcTime] = useState<string>('');
@@ -108,16 +123,22 @@ export const Header: React.FC<HeaderProps> = ({ onReconnect }) => {
           )}
 
           {/* Playback State Pill */}
-          <div
-            className={`flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-semibold border uppercase ${
+          <button
+            onClick={handleTogglePlay}
+            title={`Simulation state: ${playbackState || 'PAUSED'} (Click to toggle)`}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold border uppercase transition-all cursor-pointer ${
               playbackState === 'RUNNING'
-                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
-                : 'bg-amber-500/15 text-amber-400 border-amber-500/40'
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-glow-nominal animate-pulse'
+                : 'bg-amber-500/15 text-amber-400 border-amber-500/40 hover:bg-amber-500/25'
             }`}
           >
-            {playbackState === 'RUNNING' ? <Play className="w-3 h-3 fill-emerald-400" /> : <Pause className="w-3 h-3 fill-amber-400" />}
-            <span>{playbackState || 'STOPPED'}</span>
-          </div>
+            {playbackState === 'RUNNING' ? (
+              <Play className="w-3 h-3 fill-emerald-400" />
+            ) : (
+              <Pause className="w-3 h-3 fill-amber-400" />
+            )}
+            <span>{playbackState === 'RUNNING' ? 'STREAM: RUNNING' : 'STREAM: PAUSED'}</span>
+          </button>
         </div>
 
         {/* Right: Health Badge, WS Status & Clock */}

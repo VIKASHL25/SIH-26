@@ -59,10 +59,11 @@ export const PlaybackControls: React.FC = () => {
   const handlePlay = async () => {
     setIsLoading(true);
     setErrorMsg(null);
+    setPlaybackState('RUNNING');
     try {
       await api.startSimulation();
-      setPlaybackState('RUNNING');
     } catch (err: any) {
+      setPlaybackState('PAUSED');
       setErrorMsg(`Failed to start: ${err?.message}`);
     } finally {
       setIsLoading(false);
@@ -73,10 +74,11 @@ export const PlaybackControls: React.FC = () => {
   const handlePause = async () => {
     setIsLoading(true);
     setErrorMsg(null);
+    setPlaybackState('PAUSED');
     try {
       await api.pauseSimulation();
-      setPlaybackState('PAUSED');
     } catch (err: any) {
+      setPlaybackState('RUNNING');
       setErrorMsg(`Failed to pause: ${err?.message}`);
     } finally {
       setIsLoading(false);
