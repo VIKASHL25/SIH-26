@@ -12,21 +12,19 @@ from backend.security import verify_internal_key
 from explainability.xai_engine import DigitalTwinXAIEngine
 from backend.model_loader import DigitalTwinModelManager
 
+from contextlib import asynccontextmanager
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("XAIAdvisoryMicroservice")
-
-app = FastAPI(
-    title="Digital Twin XAI & Advisory Service",
-    description="Microservice computing SHAP feature attributions, diagnostic drivers, engineering assessments, and maintenance action advisories.",
-    version="1.0.0"
-)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Global instances
 model_manager = DigitalTwinModelManager()
 xai_engine = None
 
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global xai_engine
     try:
         model_manager.load_all_models()
@@ -35,6 +33,14 @@ def startup_event():
         logger.info("DigitalTwinXAIEngine initialized in XAI Microservice.")
     except Exception as e:
         logger.error(f"XAI initialization error: {e}")
+    yield
+
+app = FastAPI(
+    title="Digital Twin XAI & Advisory Service",
+    description="Microservice computing SHAP feature attributions, diagnostic drivers, engineering assessments, and maintenance action advisories.",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 class ExplainReq(BaseModel):
     feature_vectors: Dict[str, Any]

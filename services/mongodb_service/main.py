@@ -13,17 +13,15 @@ from pymongo import MongoClient, DESCENDING
 from dotenv import load_dotenv
 from backend.security import verify_internal_key
 
+from contextlib import asynccontextmanager
+
 # Load environment variables from .env file
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("MongoDBMicroservice")
-
-app = FastAPI(
-    title="Digital Twin MongoDB Persistence Service",
-    description="Microservice for persisting engine telemetry logs, mission summaries, advisories, fault injection logs, and engine fleet metadata to MongoDB Atlas.",
-    version="1.0.0"
-)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # MongoDB Connection Configuration (Loaded from .env)
 MONGO_URL = os.getenv("MONGO_URL")
@@ -32,8 +30,8 @@ DB_NAME = os.getenv("MONGO_DB_NAME", "aero_digital_twin_db")
 client: Optional[MongoClient] = None
 db = None
 
-@app.on_event("startup")
-def startup_db_client():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global client, db
     try:
         logger.info(f"Connecting to MongoDB Atlas database: {DB_NAME}...")
@@ -65,13 +63,17 @@ def startup_db_client():
         
     except Exception as e:
         logger.error(f"MongoDB Atlas connection error: {e}")
-
-@app.on_event("shutdown")
-def shutdown_db_client():
-    global client
+    yield
     if client:
         client.close()
         logger.info("MongoDB client connection closed.")
+
+app = FastAPI(
+    title="Digital Twin MongoDB Persistence Service",
+    description="Microservice for persisting engine telemetry logs, mission summaries, advisories, fault injection logs, and engine fleet metadata to MongoDB Atlas.",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # Pydantic Schemas matching exact collection structures
 class TelemetryLogReq(BaseModel):

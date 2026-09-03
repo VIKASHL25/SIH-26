@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import asynccontextmanager
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -13,23 +14,32 @@ from backend.simulation_engine import MissionSimulationEngine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TelemetryMicroservice")
-
-app = FastAPI(
-    title="Digital Twin Telemetry & Simulation Service",
-    description="Ingests engine telemetry, computes thermodynamic physics residuals, and manages mission playback.",
-    version="1.0.0"
-)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Global simulation engine instance
 sim_engine = MissionSimulationEngine()
 
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     try:
         sim_engine.initialize()
         logger.info("Telemetry Simulation Engine initialized successfully.")
     except Exception as e:
         logger.error(f"Telemetry engine initialization error: {e}")
+    yield
+    try:
+        sim_engine.close()
+        logger.info("Telemetry Simulation Engine closed cleanly.")
+    except Exception:
+        pass
+
+app = FastAPI(
+    title="Digital Twin Telemetry & Simulation Service",
+    description="Ingests engine telemetry, computes thermodynamic physics residuals, and manages mission playback.",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 class LoadMissionReq(BaseModel):
     mission_id: int
@@ -59,6 +69,30 @@ def get_health():
         "simulation_state": sim_engine.state,
         "active_speed": sim_engine.speed
     }
+
+@app.get("/status", dependencies=[Depends(verify_internal_key)])
+def get_simulation_status():
+    """Lightweight endpoint returning current simulation state and speed without re-evaluating frame physics."""
+    return {
+        "status": "HEALTHY" if sim_engine.mission_df is not None else "INITIALIZING",
+        "simulation_state": sim_engine.state,
+        "playback_state": sim_engine.state,
+        "playback_speed": sim_engine.speed,
+        "speed": sim_engine.speed,
+        "active_mission_id": sim_engine.active_mission_id,
+        "current_frame_idx": sim_engine.current_frame_idx,
+        "total_frames": len(sim_engine.mission_df) if sim_engine.mission_df is not None else 0
+    }
+
+@app.get("/current_frame", dependencies=[Depends(verify_internal_key)])
+def get_current_frame():
+    """Evaluates and returns current frame without advancing index."""
+    if sim_engine.mission_df is None:
+        raise HTTPException(status_code=400, detail="No active mission loaded")
+    payload = sim_engine.get_current_frame()
+    if payload is None:
+        raise HTTPException(status_code=400, detail="End of mission reached")
+    return payload
 
 @app.get("/missions", dependencies=[Depends(verify_internal_key)])
 def list_missions():
@@ -96,7 +130,17 @@ def step_simulation(force: bool = False):
     
     # Only advance frame if simulation is RUNNING, or if explicitly forced by manual step
     should_advance = (sim_engine.state == "RUNNING") or force
-    payload = sim_engine.step(advance=should_advance)
+    if not should_advance:
+        return {
+            "playback_state": sim_engine.state,
+            "simulation_state": sim_engine.state,
+            "playback_speed": sim_engine.speed,
+            "active_mission_id": sim_engine.active_mission_id,
+            "frame_index": sim_engine.current_frame_idx,
+            "total_frames": len(sim_engine.mission_df)
+        }
+        
+    payload = sim_engine.step(advance=True)
     if payload is None:
         raise HTTPException(status_code=400, detail="End of mission reached")
     
@@ -140,3 +184,4 @@ def simulate_scenario(req: ScenarioReq):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
+

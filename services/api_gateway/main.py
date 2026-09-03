@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import httpx
@@ -15,21 +16,8 @@ from backend.security import INTERNAL_SERVICE_KEY, ip_rate_limiter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("APIGateway")
-
-app = FastAPI(
-    title="MALE UAV Digital Twin API Gateway",
-    description="Central Microservices Gateway & WebSocket Proxy for GCS Dashboard Health Monitoring, Predictive Analytics & MongoDB Atlas Persistence.",
-    version="2.0.0"
-)
-
-# Enable CORS for GCS / Web Frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Microservices URLs
 TELEMETRY_SERVICE_URL = os.getenv("TELEMETRY_SERVICE_URL", "http://localhost:8001")
@@ -39,6 +27,13 @@ MONGO_SERVICE_URL = os.getenv("MONGO_SERVICE_URL", "http://localhost:8004")
 
 # Internal Service Authentication Header
 INTERNAL_HEADERS = {"X-Internal-Key": INTERNAL_SERVICE_KEY}
+
+# Global Event-Driven Simulation State & WebSocket Broadcaster
+sim_running_event = asyncio.Event()
+sim_speed: float = 1.0
+active_websockets: set = set()
+latest_frame: Optional[dict] = None
+stream_task: Optional[asyncio.Task] = None
 
 # Pydantic Schemas
 class LoadMissionReq(BaseModel):
@@ -59,6 +54,18 @@ class ScenarioReq(BaseModel):
     ambient_temp_C: Optional[float] = None
     throttle_profile: Optional[List[float]] = None
     duration_steps: Optional[int] = 30
+
+async def broadcast_frame(payload: dict):
+    """Broadcasts a telemetry frame to all connected WebSocket clients."""
+    global latest_frame
+    latest_frame = payload
+    dead = set()
+    for ws in list(active_websockets):
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            dead.add(ws)
+    active_websockets.difference_update(dead)
 
 async def enrich_and_persist_telemetry(client: httpx.AsyncClient, payload: dict) -> dict:
     """
@@ -166,6 +173,62 @@ async def enrich_and_persist_telemetry(client: httpx.AsyncClient, payload: dict)
 
     return payload
 
+async def telemetry_streaming_worker():
+    """
+    Centralized event-driven worker that advances simulation frames ONLY when running.
+    When PAUSED, this worker sleeps on sim_running_event.wait() with 0 network calls and 0 CPU usage.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        while True:
+            await sim_running_event.wait()
+            
+            if not active_websockets:
+                await asyncio.sleep(0.5)
+                continue
+
+            delay_s = max(0.05, 1.0 / max(0.1, float(sim_speed)))
+            try:
+                t_res = await client.post(f"{TELEMETRY_SERVICE_URL}/step?force=true", headers=INTERNAL_HEADERS)
+                if t_res.status_code == 200:
+                    payload = t_res.json()
+                    enriched = await enrich_and_persist_telemetry(client, payload)
+                    await broadcast_frame(enriched)
+                elif t_res.status_code == 400 and "End of mission" in t_res.text:
+                    sim_running_event.clear()
+            except Exception as e:
+                logger.debug(f"Streaming step error: {e}")
+                
+            await asyncio.sleep(delay_s)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global stream_task
+    stream_task = asyncio.create_task(telemetry_streaming_worker())
+    logger.info("API Gateway Stream Broadcaster initialized.")
+    yield
+    if stream_task:
+        stream_task.cancel()
+        try:
+            await stream_task
+        except asyncio.CancelledError:
+            pass
+
+app = FastAPI(
+    title="MALE UAV Digital Twin API Gateway",
+    description="Central Microservices Gateway & WebSocket Proxy for GCS Dashboard Health Monitoring, Predictive Analytics & MongoDB Atlas Persistence.",
+    version="2.0.0",
+    lifespan=lifespan
+)
+
+# Enable CORS for GCS / Web Frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/")
 def read_root():
     return {
@@ -215,19 +278,29 @@ async def list_missions():
 
 @app.post("/api/simulation/load_mission")
 async def load_mission(req: LoadMissionReq):
+    sim_running_event.clear()
     async with httpx.AsyncClient() as client:
         res = await client.post(f"{TELEMETRY_SERVICE_URL}/load_mission", headers=INTERNAL_HEADERS, json=req.model_dump())
         await client.post(f"{ML_SERVICE_URL}/reset_state", headers=INTERNAL_HEADERS)
+        try:
+            curr_res = await client.get(f"{TELEMETRY_SERVICE_URL}/current_frame", headers=INTERNAL_HEADERS)
+            if curr_res.status_code == 200:
+                enriched = await enrich_and_persist_telemetry(client, curr_res.json())
+                await broadcast_frame(enriched)
+        except Exception:
+            pass
         return res.json()
 
 @app.post("/api/simulation/start")
 async def start_simulation():
     async with httpx.AsyncClient() as client:
         res = await client.post(f"{TELEMETRY_SERVICE_URL}/start", headers=INTERNAL_HEADERS)
+        sim_running_event.set()
         return res.json()
 
 @app.post("/api/simulation/pause")
 async def pause_simulation():
+    sim_running_event.clear()
     async with httpx.AsyncClient() as client:
         res = await client.post(f"{TELEMETRY_SERVICE_URL}/pause", headers=INTERNAL_HEADERS)
         return res.json()
@@ -244,10 +317,13 @@ async def step_simulation(request: Request):
             raise HTTPException(status_code=t_res.status_code, detail=t_res.text)
         payload = t_res.json()
         enriched = await enrich_and_persist_telemetry(client, payload)
+        await broadcast_frame(enriched)
         return enriched
 
 @app.post("/api/simulation/speed")
 async def set_speed(req: SpeedReq):
+    global sim_speed
+    sim_speed = req.speed
     async with httpx.AsyncClient() as client:
         res = await client.post(f"{TELEMETRY_SERVICE_URL}/speed", headers=INTERNAL_HEADERS, json=req.model_dump())
         return res.json()
@@ -256,6 +332,13 @@ async def set_speed(req: SpeedReq):
 async def seek_frame(req: SeekReq):
     async with httpx.AsyncClient() as client:
         res = await client.post(f"{TELEMETRY_SERVICE_URL}/seek", headers=INTERNAL_HEADERS, json=req.model_dump())
+        try:
+            curr_res = await client.get(f"{TELEMETRY_SERVICE_URL}/current_frame", headers=INTERNAL_HEADERS)
+            if curr_res.status_code == 200:
+                enriched = await enrich_and_persist_telemetry(client, curr_res.json())
+                await broadcast_frame(enriched)
+        except Exception:
+            pass
         return res.json()
 
 @app.post("/api/simulation/inject_fault")
@@ -349,39 +432,36 @@ async def get_advisories(mission_id: Optional[int] = None):
 async def websocket_telemetry_endpoint(websocket: WebSocket):
     """
     Real-Time WebSocket Stream connecting GCS Dashboard to Microservices Pipeline & MongoDB.
+    Event-driven broadcast: zero polling, zero background HTTP calls when paused.
     """
     await websocket.accept()
-    logger.info("Client connected to API Gateway WebSocket Stream.")
+    active_websockets.add(websocket)
+    logger.info(f"Client connected to API Gateway WebSocket Stream. Active clients: {len(active_websockets)}")
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            while True:
-                t_res = await client.post(f"{TELEMETRY_SERVICE_URL}/step", headers=INTERNAL_HEADERS)
-                
-                if t_res.status_code == 200:
-                    payload = t_res.json()
-                    sim_state = payload.get("playback_state") or payload.get("simulation_state", "PAUSED")
-                    speed = payload.get("playback_speed") or payload.get("simulation_speed", 1.0)
-                    delay_s = max(0.1, 1.0 / max(0.1, float(speed)))
+    # Send initial current frame upon connection
+    try:
+        if latest_frame is not None:
+            await websocket.send_json(latest_frame)
+        else:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                curr_res = await client.get(f"{TELEMETRY_SERVICE_URL}/current_frame", headers=INTERNAL_HEADERS)
+                if curr_res.status_code == 200:
+                    init_payload = curr_res.json()
+                    enriched = await enrich_and_persist_telemetry(client, init_payload)
+                    await websocket.send_json(enriched)
+    except Exception as e:
+        logger.debug(f"Initial frame fetch error: {e}")
 
-                    if sim_state == "RUNNING":
-                        enriched = await enrich_and_persist_telemetry(client, payload)
-                        await websocket.send_json(enriched)
-                        await asyncio.sleep(delay_s)
-                    else:
-                        await websocket.send_json(payload)
-                        await asyncio.sleep(0.5)
-                else:
-                    await asyncio.sleep(0.5)
-
-        except WebSocketDisconnect:
-            logger.info("Client disconnected from API Gateway WebSocket Stream.")
-        except Exception as e:
-            logger.error(f"WebSocket Proxy Exception: {e}")
-            try:
-                await websocket.close()
-            except Exception:
-                pass
+    try:
+        # Await incoming message or disconnect without any polling loops
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        active_websockets.discard(websocket)
+        logger.info(f"Client disconnected from WebSocket Stream. Active clients: {len(active_websockets)}")
+    except Exception as e:
+        active_websockets.discard(websocket)
+        logger.debug(f"WebSocket closed: {e}")
 
 if __name__ == "__main__":
     import uvicorn
