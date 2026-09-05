@@ -7,6 +7,7 @@ import { DiagnosticsPanel } from '../components/dashboard/DiagnosticsPanel';
 import { XaiPanel } from '../components/dashboard/XaiPanel';
 import { FaultInjectionPanel } from '../components/dashboard/FaultInjectionPanel';
 import { AdvisoryFeed } from '../components/dashboard/AdvisoryFeed';
+import { AeroPistonEngine3D } from '../components/dashboard/AeroPistonEngine3D';
 import { Radio } from 'lucide-react';
 
 export const LiveDashboard: React.FC = () => {
@@ -35,6 +36,9 @@ export const LiveDashboard: React.FC = () => {
       {/* Primary Sensor Gauges Matrix */}
       <TelemetryGrid />
 
+      {/* Interactive 3D Aero Piston Engine Digital Twin */}
+      <AeroPistonEngine3D />
+
       {/* Middle Row: Live Physics Charts + Real-time Advisory Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="lg:col-span-8">
@@ -56,3 +60,4 @@ export const LiveDashboard: React.FC = () => {
     </div>
   );
 };
+

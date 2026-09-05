@@ -417,6 +417,8 @@ async def get_mission_replay(mission_id: int):
     """Mission Replay Endpoint: Fetches logged telemetry trajectory from MongoDB Atlas."""
     async with httpx.AsyncClient() as client:
         res = await client.get(f"{MONGO_SERVICE_URL}/mission_replay/{mission_id}", headers=INTERNAL_HEADERS)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail=res.json().get("detail", "Error fetching mission replay"))
         return res.json()
 
 @app.get("/api/db/advisories")
@@ -426,6 +428,8 @@ async def get_advisories(mission_id: Optional[int] = None):
         if mission_id is not None:
             url += f"?mission_id={mission_id}"
         res = await client.get(url, headers=INTERNAL_HEADERS)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail=res.json().get("detail", "Error fetching advisories"))
         return res.json()
 
 @app.websocket("/ws/telemetry")
