@@ -9,11 +9,11 @@ sys.path.insert(0, os.path.abspath('.'))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 logger = logging.getLogger("VerifyFullMicroservices")
 
-GATEWAY_URL = "http://localhost:8000"
-TELEMETRY_URL = "http://localhost:8001"
-ML_URL = "http://localhost:8002"
-XAI_URL = "http://localhost:8003"
-MONGO_URL = "http://localhost:8004"
+GATEWAY_URL = "http://127.0.0.1:8000"
+TELEMETRY_URL = "http://127.0.0.1:8001"
+ML_URL = "http://127.0.0.1:8002"
+XAI_URL = "http://127.0.0.1:8003"
+MONGO_URL = "http://127.0.0.1:8004"
 
 def main():
     logger.info("=================================================================")

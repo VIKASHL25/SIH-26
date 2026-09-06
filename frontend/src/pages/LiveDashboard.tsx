@@ -23,7 +23,7 @@ export const LiveDashboard: React.FC = () => {
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 animate-pulse text-amber-400" />
             <span>
-              LIVE TELEMETRY STREAM IS {wsStatus}: Attempting auto-reconnect to ws://localhost:8000/ws/telemetry...
+              LIVE TELEMETRY STREAM IS {wsStatus}: Attempting auto-reconnect to ws://127.0.0.1:8000/ws/telemetry...
             </span>
           </div>
           <span className="text-[10px] text-slate-400">
