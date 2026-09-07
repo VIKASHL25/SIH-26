@@ -9,6 +9,7 @@ from backend.config import DATASET_100K_PATH
 from backend.model_loader import DigitalTwinModelManager
 from backend.feature_engine import DigitalTwinFeatureEngine
 from backend.can_adapter import CANTelemetryAdapter
+from backend.can_receiver import CANInputReceiver
 from explainability.xai_engine import DigitalTwinXAIEngine
 
 logger = logging.getLogger("MissionSimulationEngine")
@@ -63,7 +64,11 @@ class MissionSimulationEngine:
         "physics_residual_C",
     ]
 
-    def __init__(self, dataset_path: str = str(DATASET_100K_PATH)):
+    def __init__(
+            self,
+            dataset_path: str = str(DATASET_100K_PATH),
+            input_mode: str = "csv",
+    ):
         self.dataset_path = dataset_path
         self.df_raw: Optional[pd.DataFrame] = None
         self.active_mission_id: Optional[int] = None
@@ -84,10 +89,33 @@ class MissionSimulationEngine:
         self.xai_engine = DigitalTwinXAIEngine()
 
         # CAN Adapter
-        self.can_adapter = CANTelemetryAdapter(
-            backend="virtual",
-            channel="engine_backend",
-        )
+        # Telemetry input
+        self.input_mode = input_mode.lower()
+
+        if self.input_mode not in {"csv", "simulink"}:
+            raise ValueError(
+                f"Invalid input_mode '{input_mode}'. "
+                "Expected 'csv' or 'simulink'."
+            )
+
+        self.can_adapter = None
+        self.can_receiver = None
+
+        if self.input_mode == "csv":
+            # Existing behavior — unchanged.
+            self.can_adapter = CANTelemetryAdapter(
+                backend="virtual",
+                channel="engine_backend",
+            )
+
+        elif self.input_mode == "simulink":
+            # External Simulink → UDP → CAN multicast input.
+            self.can_receiver = CANInputReceiver(
+                backend="udp_multicast",
+                channel="ff15:7079:7468:6f6e:6465:6d6f:6d63:6173",
+            )
+
+        logger.info(f"Telemetry input mode: {self.input_mode}")
 
         # Fault Injection Overrides & Vibration Baseline Buffer
         self.fault_overrides: Dict[str, float] = {}
@@ -191,6 +219,10 @@ class MissionSimulationEngine:
             self.can_adapter.close()
             self.can_adapter = None
 
+        if self.can_receiver is not None:
+            self.can_receiver.close()
+            self.can_receiver = None
+
     def step(self, advance: bool = True) -> Optional[Dict[str, Any]]:
         """Advances simulation by 1 tick (if advance=True) and evaluates all 4 models."""
         if self.mission_df is None or self.mission_df.empty:
@@ -221,14 +253,28 @@ class MissionSimulationEngine:
         }
 
         # Extract only normalized telemetry signals handled by the CAN layer.
-        can_telemetry = {
-            key: float(value)
-            for key, value in raw_row.items()
-            if key in self.can_adapter.SUPPORTED_SIGNALS
-        }
+        if self.input_mode == "csv":
+            # Existing CSV -> CAN -> RX path.
+            can_telemetry = {
+                key: float(value)
+                for key, value in raw_row.items()
+                if key in self.can_adapter.SUPPORTED_SIGNALS
+            }
 
-        # CSV -> CAN -> RX -> decoded telemetry
-        decoded_telemetry = self.can_adapter.transmit_and_receive(can_telemetry)
+            decoded_telemetry = self.can_adapter.transmit_and_receive(
+                can_telemetry
+            )
+
+        elif self.input_mode == "simulink":
+            # Simulink -> UDP -> CAN-FD -> RX path.
+            decoded_telemetry = self.can_receiver.receive_telemetry(
+                timeout=10.0
+            )
+
+        else:
+            raise RuntimeError(
+                f"Unsupported telemetry input mode: {self.input_mode}"
+            )
 
         # Reconstruct the backend sample.
         raw_row = {
