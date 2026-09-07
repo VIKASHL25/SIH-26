@@ -24,6 +24,8 @@ The **MALE UAV Aero Piston Engine Digital Twin Framework** provides a real-time,
 
 All project documentation, benchmarks, security policies, and technical roadmaps are consolidated in the [`docs/`](docs/) directory:
 
+- **[Engine Architecture & Physics Model](docs/ENGINE_ARCHITECTURE.md)**: High-fidelity mathematical plant schematic, multi-cylinder heat partitioning, lubrication, and CAN bus signal mappings.
+- **[MATLAB / Simulink Integration Guide](docs/SIMULINK_INTEGRATION_GUIDE.md)**: Automated `.slx` model generator script, ODE45 continuous solver, and live GCS dashboard co-simulation bridge.
 - **[Security Architecture & Policy](docs/SECURITY.md)**: 5-layer Defense-in-Depth security framework, inter-service authentication, and model SHA-256 fingerprinting.
 - **[Edge AI Benchmarking Report](docs/EDGE_AI_BENCHMARK.md)**: Model artifact sizes (KB), CPU single-core latency (ms), and Onboard vs. GCS split architecture.
 - **[Federated Learning (FedAvg) PoC](docs/FEDERATED_LEARNING.md)**: Multi-UAV fleet parameter weight averaging and zero telemetry sharing privacy proof.
