@@ -19,3 +19,8 @@ decoded_telemetry.csv
 .idea/
 .DS_Store
 Thumbs.db
+
+# MATLAB / Simulink generated files
+slprj/
+*.slxc
+*.asv

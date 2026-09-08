@@ -26,15 +26,21 @@ export const PlaybackControls: React.FC = () => {
       try {
         const data = await api.listMissions();
         if (data.available_mission_ids && data.available_mission_ids.length > 0) {
-          setAvailableMissions(data.available_mission_ids);
+          const liveMissions = data.available_mission_ids.filter((id) => id >= 1 && id <= 100);
+          setAvailableMissions(liveMissions);
           if (!selectedMissionId) {
-            setSelectedMissionId(data.active_mission_id || data.available_mission_ids[0]);
+            const activeMission = data.active_mission_id ?? -1;
+            setSelectedMissionId(
+              liveMissions.includes(activeMission)
+                ? activeMission
+                : liveMissions[0] ?? null
+            );
           }
         }
       } catch (err: any) {
         console.warn('Could not fetch mission list:', err?.message);
-        setAvailableMissions([1, 2, 3, 999]);
-        if (!selectedMissionId) setSelectedMissionId(999);
+        setAvailableMissions(Array.from({ length: 100 }, (_, index) => index + 1));
+        if (!selectedMissionId) setSelectedMissionId(1);
       }
     }
     fetchMissions();

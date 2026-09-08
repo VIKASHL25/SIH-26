@@ -278,17 +278,22 @@ async def list_missions():
 
 @app.post("/api/simulation/load_mission")
 async def load_mission(req: LoadMissionReq):
+    global latest_frame
     sim_running_event.clear()
+    latest_frame = None
     async with httpx.AsyncClient() as client:
         res = await client.post(f"{TELEMETRY_SERVICE_URL}/load_mission", headers=INTERNAL_HEADERS, json=req.model_dump())
         await client.post(f"{ML_SERVICE_URL}/reset_state", headers=INTERNAL_HEADERS)
-        try:
-            curr_res = await client.get(f"{TELEMETRY_SERVICE_URL}/current_frame", headers=INTERNAL_HEADERS)
-            if curr_res.status_code == 200:
-                enriched = await enrich_and_persist_telemetry(client, curr_res.json())
-                await broadcast_frame(enriched)
-        except Exception:
-            pass
+        # Simulink is deliberately paused after mission selection. Do not
+        # wait for a CAN frame before STREAM LIVE starts the source.
+        if res.status_code == 200 and res.json().get("input_mode") != "simulink":
+            try:
+                curr_res = await client.get(f"{TELEMETRY_SERVICE_URL}/current_frame", headers=INTERNAL_HEADERS)
+                if curr_res.status_code == 200:
+                    enriched = await enrich_and_persist_telemetry(client, curr_res.json())
+                    await broadcast_frame(enriched)
+            except Exception:
+                pass
         return res.json()
 
 @app.post("/api/simulation/start")
@@ -442,19 +447,11 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
     active_websockets.add(websocket)
     logger.info(f"Client connected to API Gateway WebSocket Stream. Active clients: {len(active_websockets)}")
 
-    # Send initial current frame upon connection
-    try:
-        if latest_frame is not None:
+    if latest_frame is not None:
+        try:
             await websocket.send_json(latest_frame)
-        else:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                curr_res = await client.get(f"{TELEMETRY_SERVICE_URL}/current_frame", headers=INTERNAL_HEADERS)
-                if curr_res.status_code == 200:
-                    init_payload = curr_res.json()
-                    enriched = await enrich_and_persist_telemetry(client, init_payload)
-                    await websocket.send_json(enriched)
-    except Exception as e:
-        logger.debug(f"Initial frame fetch error: {e}")
+        except Exception as e:
+            logger.debug(f"Initial frame send error: {e}")
 
     try:
         # Await incoming message or disconnect without any polling loops

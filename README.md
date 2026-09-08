@@ -7,8 +7,113 @@
 [![SHAP](https://img.shields.io/badge/SHAP-XAI%20Explainability-ff69b4.svg)](https://shap.readthedocs.io/)
 [![MongoDB Atlas](https://img.shields.io/badge/MongoDB%20Atlas-Cloud%20Database-47A248.svg?logo=mongodb&logoColor=white)](https://www.mongodb.com/atlas)
 [![CAN Bus](https://img.shields.io/badge/CAN%20Bus-ISO%2011898%20%2F%20DBC-blueviolet.svg)](https://python-can.readthedocs.io/)
-[![Architecture](https://img.shields.io/badge/Architecture-5--Node%20Microservices-informational.svg)](#system-architecture)
+[![Architecture](https://img.shields.io/badge/Architecture-5--Service%20Microservices%20%2B%20Simulink%20Telemetry%20Layer-informational.svg)](#system-architecture)
 [![SIH 2026](https://img.shields.io/badge/Smart%20India%20Hackathon-2026-orange.svg)](https://www.sih.gov.in/)
+
+---
+
+## Current Production/Demo Live Architecture
+
+The verified live dashboard path is a recorded-telemetry replay. Simulink is
+the real-time telemetry source for the demo; this does not claim a physical
+engine is connected and it is not physical-engine telemetry.
+
+```text
+Recorded Mission CSV
+        ↓
+MATLAB / Simulink (1-second fixed step)
+        ↓ UDP telemetry (127.0.0.1:5005)
+UDP → CAN bridge
+        ↓ CAN-FD multicast
+CANInputReceiver
+        ↓
+Telemetry / Digital Twin backend
+        ↓
+Feature Engine
+        ↓
+ML anomaly / degradation / fault models
+        ↓
+RUL prediction
+        ↓
+XAI / advisory
+        ↓
+API Gateway
+        ↓ WebSocket
+Live Dashboard
+```
+
+The existing ML, XAI, advisory, and RUL pipeline remains unchanged downstream
+of the CAN boundary. The bridge uses CAN-FD because the encoded telemetry
+messages are 9 bytes; transport is carried over the configured UDP multicast
+CAN backend. Simulink replays one recorded CSV sample per simulation second,
+so keep dashboard playback speed at `1x` for synchronized streaming.
+
+Live-mode mission selection is intentionally limited to Missions `1`–`100`.
+Mission `999` is historical-only and is not offered as a Simulink live mission.
+Selecting a mission prepares it and leaves the dashboard `PAUSED`; it does not
+start MATLAB or Simulink. Clicking `STREAM LIVE` starts the selected mission.
+The current pause behavior terminates the MATLAB/Simulink process rather than
+preserving exact Simulink simulation time for resume.
+
+### MATLAB / Simulink Live Telemetry Layer
+
+The live replay requires MATLAB R2026a with Simulink 26.1. The MATLAB entry
+point `simulink/run_mission.m` dynamically selects Mission `1`–`100` and runs
+the recorded mission through `simulink/simulink_udp_poc.slx`. Its
+`telemetry_ts` structure contains the 20 telemetry signals. The model uses a
+fixed step of `1` second and sends UDP telemetry to `127.0.0.1:5005`.
+
+Selecting a mission only prepares it; it does not launch Simulink. `STREAM
+LIVE` causes the backend `SimulinkController` to launch the selected mission.
+Mission `999` is historical-only. Keep `simulink/udp_can_bridge.py` running as
+a separate persistent process during streaming, and keep dashboard playback at
+`1x` so Simulink samples remain synchronized. `PAUSE` currently terminates the
+MATLAB/Simulink process rather than preserving exact simulation time for resume.
+
+### Verified live startup
+
+Prerequisites are Python 3.10+, the dependencies in `requirements.txt`,
+MATLAB with Simulink available on `PATH`, and Node.js/npm for the frontend.
+MATLAB/Simulink is a system prerequisite, not a Python package.
+
+From the repository root, use separate terminals:
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env
+python simulink\udp_can_bridge.py
+python services\run_all_services.py
+cd frontend
+npm ci
+npm run dev -- --host 127.0.0.1
+```
+
+Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/). The API Gateway is at
+`http://127.0.0.1:8000` and the live WebSocket is
+`ws://127.0.0.1:8000/ws/telemetry`. Start a mission from the dashboard with
+`STREAM LIVE`; do not start it merely by selecting it.
+
+### Current acceptance status
+
+| Test | Result | Evidence |
+| --- | --- | --- |
+| CAN round-trip | PASS | 20/20 telemetry signals recovered |
+| UDP multicast CAN | PASS | CAN-FD multicast transport and all 8 message IDs |
+| Simulink Mission 1 | PASS | 1000 samples, 20 signals, UDP emitted |
+| Simulink Mission 25 | PASS | 1000 samples, 20 signals, UDP emitted |
+| Simulink Mission 100 | PASS | 1000 samples, 20 signals, UDP emitted |
+| UDP→CAN bridge | PASS | Simulink UDP packets converted to CAN-FD |
+| CANInputReceiver | PASS | All 8 CAN message IDs and 20 decoded signals |
+| Backend ML | PASS | Anomaly, degradation, and fault outputs present |
+| XAI/advisory | PASS | Enriched frames include XAI and advisories |
+| RUL | PASS | RUL history warm-up reached prediction state |
+| API Gateway | PASS | Load, start, and pause endpoints verified |
+| WebSocket | PASS | Enriched live telemetry frames received |
+| Frontend build | PASS | Existing production build completed |
+| Mission 25 live dashboard | PASS | Live sensors and ML/XAI/RUL visible for Mission 25 |
+| Mission 25 → Mission 100 switching | PASS | Switch paused first mission; explicit live start ran Mission 100 |
 
 ---
 
@@ -25,7 +130,7 @@ The **MALE UAV Aero Piston Engine Digital Twin Framework** provides a real-time,
 All project documentation, benchmarks, security policies, and technical roadmaps are consolidated in the [`docs/`](docs/) directory:
 
 - **[Engine Architecture & Physics Model](docs/ENGINE_ARCHITECTURE.md)**: High-fidelity mathematical plant schematic, multi-cylinder heat partitioning, lubrication, and CAN bus signal mappings.
-- **[MATLAB / Simulink Integration Guide](docs/SIMULINK_INTEGRATION_GUIDE.md)**: Automated `.slx` model generator script, ODE45 continuous solver, and live GCS dashboard co-simulation bridge.
+- **[MATLAB / Simulink Integration Guide](docs/SIMULINK_INTEGRATION_GUIDE.md)**: Current recorded-mission replay path, 1-second fixed-step UDP output, and the UDP→CAN-FD live dashboard bridge. Legacy plant-generation notes are marked as historical in that guide.
 - **[Security Architecture & Policy](docs/SECURITY.md)**: 5-layer Defense-in-Depth security framework, inter-service authentication, and model SHA-256 fingerprinting.
 - **[Edge AI Benchmarking Report](docs/EDGE_AI_BENCHMARK.md)**: Model artifact sizes (KB), CPU single-core latency (ms), and Onboard vs. GCS split architecture.
 - **[Federated Learning (FedAvg) PoC](docs/FEDERATED_LEARNING.md)**: Multi-UAV fleet parameter weight averaging and zero telemetry sharing privacy proof.
@@ -105,7 +210,7 @@ All project documentation, benchmarks, security policies, and technical roadmaps
 
 ## 🌟 Key Highlights & Capabilities
 
-- ⚡ **5-Tier Microservices Architecture**: Decoupled, scalable microservices orchestrating telemetry streaming, ML inference, explainability, persistence, and API gateway operations.
+- ⚡ **Five HTTP Microservices + Simulink Telemetry Layer**: Decoupled services downstream of the recorded-mission Simulink source, orchestrating telemetry processing, ML inference, explainability, persistence, and API gateway operations.
 - 🔬 **Physics-Informed Thermodynamics**: Calculates dynamic residuals between real-time sensor observations and expected physical values ($CHT_{\text{residual}}$, $EGT_{\text{residual}}$, $RPM_{\text{residual}}$, Fuel/Air ratios, Thermal efficiency).
 - 🧠 **Multi-Model AI/ML Diagnostics**:
   1. **Anomaly Detection**: Unsupervised Isolation Forest isolating multivariate operating outliers.
@@ -116,7 +221,7 @@ All project documentation, benchmarks, security policies, and technical roadmaps
   - Additive TreeSHAP value decomposition for tree-based models.
   - Counterfactual sensitivity analysis and normalized Z-score distance metrics for Isolation Forest anomalies.
   - Human-interpretable engineering narratives and actionable maintenance advisories.
-- 📡 **CAN 2.0B Hardware Protocol Compliance**: Complete DBC specification (`engine_can.dbc`) encoding/decoding raw sensor signals to/from standard CAN frames.
+- 📡 **CAN-FD Telemetry Boundary**: Complete DBC specification (`engine_can.dbc`) encoding/decoding raw sensor signals for the verified UDP multicast transport. Encoded frames are 9 bytes because of the checksum and therefore require CAN-FD.
 - ☁️ **Mission Telemetry & Fleet History in MongoDB Atlas**: Automatic frame-by-frame logging, mission summaries, advisory history, and full historical mission trajectory playback.
 - 🛠️ **Synthetic Fault Injection Engine**: Real-time what-if scenario testing (e.g. inject $+30^\circ\text{C}$ CHT rise or $-2.0\,\text{bar}$ oil pressure drop) to validate model diagnostics live.
 
@@ -124,63 +229,74 @@ All project documentation, benchmarks, security policies, and technical roadmaps
 
 ## 🏗️ System Architecture
 
-The framework is organized into five distributed microservices running over high-speed HTTP and WebSockets:
+The verified live demo has an external/system-level Simulink telemetry source
+and transport layer feeding five HTTP microservices. Simulink is not counted as
+one of the five services.
 
 ```mermaid
 flowchart TD
-    subgraph SENSORS_CAN ["CAN Hardware & Simulation Layer"]
-        CSV[("Flight Telemetry Dataset\n(100k+ Records)")] --> SIM["Telemetry & Simulation Service\n(Port 8001)"]
-        SIM --> DBC["CAN Codec & DBC Spec\n(engine_can.dbc)"]
-        DBC --> CAN_BUS["Virtual / Hardware CAN Bus\n(ISO 11898)"]
-        CAN_BUS --> DECODE["CAN Telemetry Adapter"]
+    subgraph LIVE_SOURCE ["External Simulink Telemetry Source / Transport"]
+        CSV[("Recorded Mission CSV")] --> SIM["MATLAB / Simulink\n1-second fixed step"]
+        SIM --> UDP["UDP telemetry\n127.0.0.1:5005"]
+        UDP --> BRIDGE["udp_can_bridge.py\nUDP → CAN bridge"]
+        BRIDGE --> MCAST["CAN-FD multicast\n9-byte encoded frames"]
+        MCAST --> CANRX["CANInputReceiver"]
     end
 
-    subgraph FEATURES ["Feature Engineering Layer"]
-        DECODE --> FE["DigitalTwinFeatureEngine\n(120-Frame Rolling Buffer)"]
+    subgraph HTTP_SERVICES ["Five HTTP Microservices"]
+        TELEMETRY["Telemetry / Digital Twin Service\nPort 8001"]
+        ML_SERVICE["AI/ML Inference Service\nPort 8002"]
+        XAI_SERVICE["XAI & Advisory Service\nPort 8003"]
+        MONGO_SERVICE["Persistence Service\nPort 8004"]
+        GATEWAY["API Gateway\nPort 8000"]
+    end
+
+    CANRX --> TELEMETRY
+
+    subgraph FEATURES ["Physics-Informed Feature Engineering Layer"]
+        TELEMETRY --> FE["DigitalTwinFeatureEngine\n(120-Frame Rolling Buffer)"]
         FE --> FV1["13-Feat Anomaly Vector"]
         FE --> FV2["120-Feat Degradation Vector"]
         FE --> FV3["55-Feat Fault Vector"]
         FE --> FV4["60-Feat RUL Vector"]
     end
 
-    subgraph ML_SERVICE ["AI/ML Inference Microservice (Port 8002)"]
-        FV1 --> M1["Model 1: Isolation Forest\n(Anomaly Detection)"]
-        FV2 --> M2["Model 2: XGBoost Regressor\n(Degradation % Score)"]
-        FV3 --> M3["Model 3: XGBoost Classifier\n(Multiclass Fault)"]
-        FV4 --> M4["Model 4: XGBoost Regressor\n(RUL & Uncertainty Filter)"]
-    end
-
-    subgraph XAI_SERVICE ["XAI & Advisory Microservice (Port 8003)"]
-        M1 & M2 & M3 & M4 --> XAI["DigitalTwinXAIEngine"]
+    FV1 & FV2 & FV3 & FV4 --> ML_SERVICE
+    ML_SERVICE --> M1["ML inference\nAnomaly / Degradation / Fault / RUL"]
+    M1 --> XAI_SERVICE
+    subgraph XAI_PIPELINE ["XAI / Advisory"]
+        XAI_SERVICE --> XAI["DigitalTwinXAIEngine"]
         XAI --> SHAP["Additive TreeSHAP"]
         XAI --> SENS["Counterfactual Perturbation"]
         XAI --> MAP["FeatureMapper (Engineering Names)"]
         XAI --> ADV["Advisory State Tracker (Anti-Spam)"]
     end
 
-    subgraph MONGO_SERVICE ["MongoDB Atlas Persistence (Port 8004)"]
+    subgraph PERSISTENCE ["Downstream Persistence"]
         LOGS[("mission_telemetry_logs")]
         SUMM[("mission_summaries")]
         ADVH[("advisory_history")]
         FLEET[("engine_fleet_metadata")]
     end
 
-    subgraph GATEWAY ["Central API Gateway Service (Port 8000)"]
-        GW["FastAPI Central Gateway"]
-        WS["WebSocket Stream (/ws/telemetry)"]
-        REST["REST Endpoints & Mission Replay"]
-    end
-
-    SIM --> GW
-    GW <--> ML_SERVICE
-    GW <--> XAI_SERVICE
-    GW <--> MONGO_SERVICE
-    GW --> WS
-    GW --> REST
+    ADV --> GATEWAY
+    TELEMETRY -. HTTP .-> GATEWAY
+    GATEWAY --> WS["WebSocket\n/ws/telemetry"]
+    GATEWAY --> REST["REST endpoints"]
+    GATEWAY --> MONGO_SERVICE
+    MONGO_SERVICE --> LOGS & SUMM & ADVH & FLEET
 
     WS --> GCS["Ground Control Station Dashboard"]
     REST --> GCS
-    MONGO_SERVICE --- LOGS & SUMM & ADVH & FLEET
+```
+
+The live telemetry path is therefore:
+
+```text
+Recorded Mission CSV → MATLAB / Simulink → UDP → udp_can_bridge.py
+→ CAN-FD multicast → CANInputReceiver → existing backend
+→ Physics-Informed Feature Engine → ML → XAI / advisory
+→ API Gateway → WebSocket → Ground Control Station Live Dashboard
 ```
 
 ---
@@ -277,18 +393,35 @@ Black-box predictions are unacceptable in aviation. The XAI layer translates mul
 
 ## 📡 CAN Bus Protocol & Telemetry Adapter Layer
 
-The platform includes an **ISO 11898 CAN 2.0B compliance layer** (`can_layer/`) defining bit-level signal packings in `can_layer/engine_can.dbc`.
+The project supports two CAN paths. The verified live Simulink path is:
+
+```text
+CSV → Simulink → UDP → udp_can_bridge.py → CAN-FD multicast → CANInputReceiver
+```
+
+The existing local/validation path remains:
+
+```text
+CSV/raw telemetry → CANTelemetryAdapter → virtual or hardware CAN → decode
+```
+
+The `can_layer/` DBC defines the signal packing used by both paths. The
+encoded telemetry frames are 9 bytes because of the checksum, so the UDP
+multicast transport uses CAN-FD frames. These 9-byte frames must not be
+described as classic CAN 2.0B frames.
 
 ### Standardized CAN Messages
 
-| CAN ID (Hex) | Message Name | DLC (Bytes) | Transmitted Signals |
+| CAN ID (Hex) | Message Name | DBC payload bytes | Transmitted Signals |
 | :---: | :--- | :---: | :--- |
-| `0x100` | `ENGINE_CORE_DYNAMICS` | 8 | Engine RPM, Throttle Position (%), Engine Load (%) |
-| `0x101` | `ENGINE_THERMAL_STATUS` | 8 | Cylinder Head Temp (CHT), Exhaust Gas Temp (EGT), Oil Temp, Oil Pressure |
-| `0x102` | `FUEL_AND_AIRFLOW` | 8 | Air Mass Flow Rate ($\text{kg/s}$), Fuel Flow Rate ($\text{kg/s}$) |
-| `0x103` | `MECHANICAL_AND_ELECTRICAL` | 8 | Engine Torque ($\text{Nm}$), Power ($\text{W}$), Vibration RMS, Battery Voltage ($\text{V}$) |
-| `0x104` | `ELECTRICAL_AND_IGNITION` | 8 | Alternator Current ($\text{A}$), Alternator Health, Injection Timing ($^\circ$) |
-| `0x105` | `FLIGHT_ENVIRONMENT` | 8 | Altitude ($\text{m}$), Ambient Temp ($^\circ\text{C}$), Atmospheric Pressure ($\text{kPa}$), Air Density |
+| `0x100` | `ENGINE_STATE` | 8 | RPM, Throttle Position, Engine Load |
+| `0x101` | `THERMAL` | 8 | CHT, EGT, Oil Temperature, Oil Pressure |
+| `0x102` | `AIR_FUEL` | 8 | Air Mass Flow, Fuel Flow |
+| `0x103` | `MECHANICAL` | 8 | Torque, Power, Vibration RMS |
+| `0x104` | `ELECTRICAL` | 8 | Battery Voltage, Alternator Current, Alternator Health |
+| `0x105` | `ENVIRONMENT` | 8 | Altitude, Ambient Temperature, Pressure |
+| `0x106` | `INJECTION` | 8 | Injection Timing |
+| `0x107` | `AIR_DENSITY` | 8 | Air Density |
 
 The `CANTelemetryAdapter` in `backend/can_adapter.py` acts as a bi-directional transceiver:
 $$\text{Raw Telemetry} \xrightarrow{\text{Encode}} \text{CAN Frames} \xrightarrow{\text{Transmit}} \text{CAN Bus (Virtual/Hardware)} \xrightarrow{\text{Receive}} \text{CAN Frames} \xrightarrow{\text{Decode}} \text{Normalized Signals}$$
@@ -357,6 +490,8 @@ SIH-26/
 │   ├── feature_engine.py                  # Physics Residuals & 120-Feature Rolling Engine
 │   ├── model_loader.py                    # Unified 4-Model Manager & Temporal Filtering
 │   ├── simulation_engine.py               # Flight Simulation & Replay Engine
+│   ├── can_receiver.py                     # CAN-FD Multicast Receiver for Simulink Telemetry
+│   ├── simulink_controller.py              # MATLAB/Simulink Mission Process Controller
 │   └── verify_microservices.py            # End-to-End Microservices Test Suite
 │
 ├── can_layer/                              # CAN Bus Hardware Interface Layer
@@ -368,6 +503,12 @@ SIH-26/
 │   ├── sample_engine_sensor_input.csv     # Sample Telemetry for CAN Validation
 │   ├── sensor_simulator.py                # Simulated ECU Sensor Transmitter
 │   └── README.md                          # Detailed CAN Subsystem Documentation
+│
+├── simulink/                               # Recorded Mission Simulink Telemetry Layer
+│   ├── simulink_udp_poc.slx                # UDP telemetry replay model
+│   ├── run_mission.m                        # Mission 1–100 selector and runner
+│   ├── udp_can_bridge.py                    # UDP telemetry to CAN-FD multicast bridge
+│   └── README.md                            # Simulink integration documentation
 │
 ├── data/                                   # Datasets & Flight Logs
 │   ├── MALE_UAV_aero_piston_engine_final_100k.csv  # 100k Multi-Mission Flight Dataset
@@ -399,7 +540,7 @@ SIH-26/
 │       ├── xgboost_rul_model.json         # XGBoost RUL Regressor (60 Features)
 │       └── xgboost_rul_features.txt       # RUL Feature Specification List
 │
-├── services/                               # 5-Tier Microservices Architecture
+├── services/                               # Five HTTP Microservices
 │   ├── api_gateway/
 │   │   └── main.py                        # Central Gateway, WebSocket Proxy (Port 8000)
 │   ├── telemetry_service/
@@ -412,7 +553,7 @@ SIH-26/
 │   │   └── main.py                        # MongoDB Atlas Persistence Service (Port 8004)
 │   └── run_all_services.py                # Automated Multi-Service Supervisor & Process Manager
 │
-├── .env.example                            # Template for MongoDB Atlas Credentials
+├── .env.example                            # Local service and telemetry configuration template
 ├── .gitignore                              # Git Ignore Configuration
 ├── requirements.txt                        # Production Python Dependencies
 └── README.md                               # Master Project Documentation
@@ -470,12 +611,38 @@ MONGO_DB_NAME=aero_digital_twin_db
 
 ## 🚀 Running the Platform
 
-### Single-Command Multi-Service Launcher (Recommended)
-Launch all 5 microservices concurrently with automatic port conflict resolution:
+The UDP→CAN bridge is a separate persistent process and must be started before
+the five HTTP microservices. MATLAB is launched by `SimulinkController` only
+when `STREAM LIVE` is clicked in the dashboard.
+
+### Recommended live startup order
+
+Terminal 1 — keep the UDP→CAN bridge running:
+
+```powershell
+python simulink\udp_can_bridge.py
+```
+
+Terminal 2 — launch the five HTTP microservices:
 
 ```bash
 python services/run_all_services.py
 ```
+
+Terminal 3 — start the frontend:
+
+```powershell
+cd frontend
+npm run dev -- --host 127.0.0.1
+```
+
+Then open [http://127.0.0.1:5173/](http://127.0.0.1:5173/) and use the
+dashboard to select a live mission and click `STREAM LIVE`.
+
+### Single-Command Multi-Service Launcher
+
+The service launcher starts the five HTTP microservices concurrently with
+automatic port conflict resolution:
 
 ```text
 ================================================================================
@@ -488,8 +655,8 @@ python services/run_all_services.py
 [LAUNCH] Launching API Gateway Service on Port 8000...
 ================================================================================
 ALL 5 MICROSERVICES ONLINE AND READY!
-API Gateway URL:      http://localhost:8000
-WebSocket Stream:     ws://localhost:8000/ws/telemetry
+API Gateway URL:      http://127.0.0.1:8000
+WebSocket Stream:     ws://127.0.0.1:8000/ws/telemetry
 MongoDB Replay API:   http://localhost:8000/api/db/mission/999/replay
 Press Ctrl+C to terminate all microservices.
 ================================================================================
@@ -530,7 +697,7 @@ The API Gateway runs on **Port 8000** and serves as the unified interface for th
 | Category | Method | Endpoint | Request Body | Description |
 | :--- | :---: | :--- | :--- | :--- |
 | **System** | `GET` | `/` | — | Microservice service directory & versions. |
-| **Health** | `GET` | `/api/health` | — | Full cluster health check across all 5 nodes. |
+| **Health** | `GET` | `/api/health` | — | Full cluster health check across all 5 HTTP services. |
 | **Missions** | `GET` | `/api/missions` | — | List all available recorded mission IDs. |
 | **Simulation** | `POST` | `/api/simulation/load_mission` | `{"mission_id": 999}` | Loads mission dataset and resets filters. |
 | **Simulation** | `POST` | `/api/simulation/start` | — | Starts continuous real-time mission playback. |

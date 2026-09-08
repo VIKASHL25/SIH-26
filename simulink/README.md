@@ -473,9 +473,13 @@ The existing CAN codec/DBC was not redesigned for this integration.
 
 ---
 
-# 12. Remaining Work
+# 12. Current Live Integration Status
 
-## NEXT: Backend → Frontend
+The backend-to-frontend integration is complete. The older exploratory notes
+below are retained only as implementation history; the acceptance results in
+the final section are the authoritative current status.
+
+## Verified Backend → Frontend Path
 
 Verify the existing frontend with:
 
@@ -493,13 +497,13 @@ Existing API / WebSocket
 Existing Frontend Dashboard
 ```
 
-First test whether the existing dashboard works with:
+The existing dashboard now works with:
 
 ```python
 input_mode="simulink"
 ```
 
-Do not redesign the frontend unless an actual integration mismatch is found.
+No frontend redesign is required for this integration.
 
 Verify that the dashboard displays:
 
@@ -519,9 +523,9 @@ XAI / Advisory
 
 ---
 
-## After Frontend
+## Historical validation notes
 
-### 1. Timing / synchronization validation
+### 1. Timing / synchronization
 
 Verify:
 
@@ -549,7 +553,7 @@ Verify backend stability for the complete mission.
 
 ### 3. Missions 1–100
 
-Eventually verify:
+The live selector supports:
 
 ```text
 Mission 1
@@ -562,15 +566,14 @@ while keeping the same telemetry interface.
 
 ### 4. Final demo configuration
 
-Finalize:
+Current demo configuration:
 
-- Simulink Stop Time
-- playback speed
-- frontend refresh rate
-- backend WebSocket behavior
-- mission selection
-- startup sequence
-- error handling
+- Simulink Stop Time: 1000 seconds / 1000 samples
+- playback speed: 1x
+- mission selection: 1–100 for live mode; 999 historical-only
+- startup: selecting prepares and pauses; STREAM LIVE starts Simulink
+- UDP endpoint: 127.0.0.1:5005
+- pause behavior: terminates MATLAB/Simulink rather than preserving exact time
 
 ---
 
@@ -607,10 +610,11 @@ python simulink\udp_can_bridge.py
 
 Leave it running.
 
-### MATLAB — Simulink
+### MATLAB / Simulink
 
 ```matlab
-sim('simulink_udp_poc')
+% Normally started by the API after STREAM LIVE:
+% run_mission(25, 1000)
 ```
 
 Recommended test configuration:
@@ -657,33 +661,15 @@ SIMULINK → UDP → CAN → BACKEND → ML → XAI
 
 ---
 
-# 16. Tomorrow's Next Step
+# 16. Current Acceptance Result
 
-Do not change the working Simulink/CAN/ML pipeline.
-
-Start with:
+The working Simulink/CAN/ML pipeline is complete and should be preserved.
 
 ```text
-VERIFY BACKEND → FRONTEND
+FULL LIVE DIGITAL TWIN ACCEPTANCE TEST: PASS
 ```
 
-Specifically determine whether the existing API/WebSocket and dashboard already display the Simulink-fed backend results.
-
-If it works:
-
-```text
-[✓] Full end-to-end integration
-```
-
-If it fails:
-
-```text
-Identify exact interface mismatch
-        ↓
-Modify only that interface
-        ↓
-Retest
-```
+The verified sequence is recorded in the root README acceptance table.
 
 ---
 
@@ -704,9 +690,10 @@ Fault Classification  ✓
 RUL                   ✓
 XAI                   ✓
 Advisory              ✓
-Frontend              TODO
-Full missions         TODO
-Final timing          TODO
+Frontend              ✓
+Mission 25 live       ✓
+Mission 25 → 100      ✓
+Final timing          ✓
 ```
 
 The core Simulink-to-AI integration is working.

@@ -2,6 +2,28 @@
 
 This guide explains how to generate, simulate, and link the **MALE UAV Aero Piston Engine Simulink Model** (`AeroPistonEngine_DigitalTwin.slx`) directly with our live **Ground Control Station (GCS) Dashboard** and **AI/ML Microservices Ecosystem**.
 
+> Current live-demo path: Simulink replays recorded mission CSV telemetry as
+> a real-time source. Use `simulink/simulink_udp_poc.slx` and
+> `simulink/run_mission.m`, not the legacy generated continuous plant described
+> below. The current path is `CSV → Simulink → UDP 127.0.0.1:5005 → UDP→CAN
+> bridge → CAN-FD multicast → CANInputReceiver → backend ML/XAI/RUL → API
+> Gateway → WebSocket → dashboard`. It is not physical-engine telemetry.
+
+## Current live replay procedure
+
+1. Start `python simulink\udp_can_bridge.py`.
+2. Start `python services\run_all_services.py`.
+3. Start the frontend with `cd frontend; npm ci; npm run dev -- --host 127.0.0.1`.
+4. Open `http://127.0.0.1:5173/`, select Mission `1`–`100`, and confirm the
+   dashboard remains `PAUSED`.
+5. Click `STREAM LIVE` to start the selected Simulink mission. Mission `999`
+   is historical-only and is not a live Simulink selection.
+
+Simulink uses a 1-second fixed step so each CSV row produces one simulation
+sample and one UDP packet. Keep dashboard playback speed at `1x`. PAUSE
+currently terminates MATLAB/Simulink rather than preserving exact simulation
+time for resume.
+
 ---
 
 ## 📂 Available Simulink Files

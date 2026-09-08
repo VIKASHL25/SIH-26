@@ -2,6 +2,11 @@ import sys
 import can
 from pathlib import Path
 
+# The bridge logs Unicode arrows; make it safe to launch from a default
+# Windows PowerShell console using the system's non-UTF-8 code page.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 from websockets import frames
 
 # Allow imports from the repository root
@@ -18,7 +23,7 @@ CAN_BACKEND = "udp_multicast"
 CAN_CHANNEL = "ff15:7079:7468:6f6e:6465:6d6f:6d63:6173"
 
 
-def telemetry_to_can(telemetry, tx_bus, rx_bus):
+def telemetry_to_can(telemetry, tx_bus):
     """
     Send one UDP-derived telemetry dictionary through
     the existing CAN encoder and decoder.
@@ -35,19 +40,11 @@ def telemetry_to_can(telemetry, tx_bus, rx_bus):
         )
         tx_bus.send(fd_frame)
 
-    # ---------------- CAN RECEIVE ----------------
-
+    # The bridge's job is to publish CAN frames. Decode the same encoded
+    # frames locally for logging instead of opening a second multicast
+    # receive socket that can compete with the backend receiver on Windows.
     decoded = {}
-
-    for _ in frames:
-
-        frame = rx_bus.recv(timeout=1.0)
-
-        if frame is None:
-            raise RuntimeError(
-                "Timed out waiting for CAN frame"
-            )
-
+    for frame in frames:
         decoded.update(decode_frame(frame))
 
     return decoded
@@ -60,11 +57,6 @@ def main():
 
     # Existing CAN infrastructure
     tx_bus = create_bus(
-        CAN_BACKEND,
-        CAN_CHANNEL,
-    )
-
-    rx_bus = create_bus(
         CAN_BACKEND,
         CAN_CHANNEL,
     )
@@ -98,7 +90,6 @@ def main():
             decoded = telemetry_to_can(
                 telemetry,
                 tx_bus,
-                rx_bus,
             )
 
             # ------------------------------------------------
@@ -123,7 +114,6 @@ def main():
 
         udp_sock.close()
         tx_bus.shutdown()
-        rx_bus.shutdown()
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from backend.security import verify_internal_key
 from backend.simulation_engine import MissionSimulationEngine
+from backend.simulink_controller import SimulinkController
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TelemetryMicroservice")
@@ -18,7 +19,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Global simulation engine instance
-sim_engine = MissionSimulationEngine()
+# Live dashboard input is Simulink -> UDP -> CAN. Keep CSV available for
+# standalone/replay callers through TELEMETRY_INPUT_MODE=csv.
+sim_engine = MissionSimulationEngine(
+    input_mode=os.getenv("TELEMETRY_INPUT_MODE", "simulink")
+)
+simulink_controller = SimulinkController()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,6 +35,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Telemetry engine initialization error: {e}")
     yield
     try:
+        simulink_controller.close()
         sim_engine.close()
         logger.info("Telemetry Simulation Engine closed cleanly.")
     except Exception:
@@ -104,11 +111,17 @@ def list_missions():
 @app.post("/load_mission", dependencies=[Depends(verify_internal_key)])
 def load_mission(req: LoadMissionReq):
     try:
+        if sim_engine.input_mode == "simulink" and not 1 <= req.mission_id <= 100:
+            raise ValueError(
+                "Mission 999 is historical-only and is not supported by Simulink live mode."
+            )
         sim_engine.load_mission(req.mission_id)
+        simulink_controller.select_mission(req.mission_id)
         return {
             "message": f"Successfully loaded Mission {req.mission_id}",
             "active_mission_id": sim_engine.active_mission_id,
-            "total_frames": len(sim_engine.mission_df)
+            "total_frames": len(sim_engine.mission_df),
+            "input_mode": sim_engine.input_mode,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -116,12 +129,22 @@ def load_mission(req: LoadMissionReq):
 @app.post("/start", dependencies=[Depends(verify_internal_key)])
 def start_simulation():
     sim_engine.set_state("RUNNING")
-    return {"message": "Simulation started", "state": sim_engine.state}
+    simulink_controller.start()
+    return {
+        "message": "Simulation started",
+        "state": sim_engine.state,
+        "active_mission_id": sim_engine.active_mission_id
+    }
 
 @app.post("/pause", dependencies=[Depends(verify_internal_key)])
 def pause_simulation():
     sim_engine.set_state("PAUSED")
-    return {"message": "Simulation paused", "state": sim_engine.state}
+    simulink_controller.stop()
+    return {
+        "message": "Simulation paused",
+        "state": sim_engine.state,
+        "active_mission_id": sim_engine.active_mission_id
+    }
 
 @app.post("/step", dependencies=[Depends(verify_internal_key)])
 def step_simulation(force: bool = False):

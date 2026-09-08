@@ -3,7 +3,11 @@
 **Smart India Hackathon 2026 | DRDO Problem Statement 26054**  
 *"AI-Enabled Real-Time Digital Twin System for Health Monitoring, Fault Prediction and Mission Reliability Enhancement of Aero Piston Engines used in MALE UAVs"*
 
-This frontend is a defence-grade Ground Control Station (GCS) web application built with **React 18 + TypeScript + Vite + Tailwind CSS**, consuming the 5-microservice FastAPI backend architecture.
+This frontend is a defence-grade Ground Control Station (GCS) web application built with **React + TypeScript + Vite + Tailwind CSS**, consuming the API Gateway REST and WebSocket interfaces.
+
+For the verified live demo, Simulink replays recorded mission CSV telemetry at
+one sample per second. The dashboard is not connected to a physical engine.
+Live Simulink missions are `1`–`100`; Mission `999` is historical-only.
 
 ---
 
@@ -20,7 +24,7 @@ This frontend is a defence-grade Ground Control Station (GCS) web application bu
      - *Fault Classification (Multiclass XGBoost)*: Real-time classification (`normal`, `overheating`, `lubrication_degradation`, `injector_degradation`, `sensor_fault`) with confidence percentages and horizontal probability distribution bars.
    - **Explainable AI (XAI) & SHAP Diagnostic Drivers**: Ranked horizontal impact bars showing sensor attributions, directional influence, natural-language engineering assessment, and autonomous maintenance actions.
    - **Real-Time Advisory Feed**: Deduplicated, severity-colored alert feed with filter controls.
-   - **Mission Simulation Controls**: Load mission dataset (e.g. Mission #999 Out-of-Sample Demo), Play, Pause, Step 1 frame, Speed selector (0.25x–10x), and Timeline Scrubber.
+   - **Mission Simulation Controls**: Prepare a live Simulink mission (`1`–`100`), keep the dashboard paused until `STREAM LIVE` is clicked, pause/stop the current run, and select the playback speed. Keep speed at `1x` for synchronized Simulink streaming.
    - **Synthetic Fault Injection & "What-If" Analysis**: Quick presets (Thermal Overheating, Lubrication Loss, Vibration Spike, Lean Mixture) and custom parameter delta injection with active override badges and one-click clear.
 
 2. **Mission Replay & Post-Flight Analysis (`/replay`)**
@@ -47,33 +51,45 @@ This frontend is a defence-grade Ground Control Station (GCS) web application bu
 
 ## Quick Start Guide
 
-### Step 1: Start the Backend Microservices
-Ensure the backend Python virtual environment is activated and launch all 5 microservices:
+### Step 1: Start the UDP→CAN bridge and backend
+
+MATLAB/Simulink must be installed and `matlab` must be available on `PATH`.
+The bridge must be running before starting a live mission:
 
 ```powershell
-# From the repository root (C:\Users\harsh\Desktop\SIH-26)
-python services/run_all_services.py
+# From the repository root
+python simulink\udp_can_bridge.py
+python services\run_all_services.py
 ```
 
-This starts:
-- Port 8000: API Gateway Service (`http://localhost:8000`)
-- Port 8001: Telemetry & Simulation Service
-- Port 8002: AI/ML Inference Service
-- Port 8003: XAI & Advisory Service
-- Port 8004: MongoDB Atlas Persistence Service
+The live path is `CSV → Simulink → UDP → UDP→CAN → CAN multicast →
+CANInputReceiver → backend ML/XAI/RUL → API Gateway → WebSocket`.
+Selecting a mission only prepares it and leaves the dashboard `PAUSED`; click
+`STREAM LIVE` to start MATLAB/Simulink for the selected mission. PAUSE currently
+terminates MATLAB/Simulink rather than preserving exact simulation time for a
+later resume.
 
 ### Step 2: Install and Launch Frontend
 
 ```powershell
 cd frontend
-npm install
-npm run dev
+npm ci
+npm run dev -- --host 127.0.0.1
 ```
 
 The GCS dashboard will be available at:
-`http://localhost:5173`
+`http://127.0.0.1:5173/`
 
 Vite is pre-configured to proxy `/api` calls to `http://localhost:8000` and `/ws` WebSocket traffic to `ws://localhost:8000`.
+
+### Production build
+
+```powershell
+npm run build
+```
+
+The verified build uses the declared dependencies in `package-lock.json`; no
+dependency version changes are required for the live integration.
 
 ---
 

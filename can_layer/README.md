@@ -19,38 +19,42 @@ The ML models and feature engine do not need to know how CAN bytes are packed.
 
 ## Integrated System Pipeline
 
-The current prototype uses the following end-to-end architecture:
+The verified production/demo path uses the following end-to-end architecture:
 
-    CSV Dataset
+    Recorded Mission CSV
          |
          v
-    MissionSimulationEngine
+    MATLAB / Simulink replay
+         | UDP 127.0.0.1:5005
+         v
+    UDP -> CAN-FD bridge
+         | UDP multicast CAN transport
          |
          v
-    CANTelemetryAdapter
+    CANInputReceiver
          |
          v
-    CAN Encoder + DBC
+    Telemetry / Digital Twin backend
          |
          v
-    Virtual CAN Bus
+    Feature Engine -> ML -> RUL -> XAI/advisory
+         |
+         v
+    API Gateway -> WebSocket -> Live Dashboard
+
+The bridge is the intentional transport boundary between the recorded
+Simulink source and the existing backend. The backend ML, XAI, advisory, and
+RUL pipeline remains unchanged downstream of decoded CAN telemetry.
+
+The CAN-only CSV loopback below remains available for isolated codec tests:
+
+    CSV Dataset -> CANTelemetryAdapter -> CAN Encoder + DBC
          |
          v
     CAN Decoder + DBC
          |
          v
     Normalized Telemetry
-         |
-         v
-    DigitalTwinFeatureEngine
-         |
-         +--> Anomaly Detection
-         +--> Degradation Detection
-         +--> Fault Classification
-         +--> RUL Estimation
-         |
-         v
-    Digital Twin Backend / FastAPI
 
 The CAN layer therefore sits between the telemetry source and the existing
 Digital Twin / ML pipeline.
@@ -107,7 +111,9 @@ The CAN subsystem is contained in:
 
 ## CAN Bus Backend
 
-The default implementation uses `python-can`'s `VirtualBus`.
+The isolated CAN tests use `python-can`'s `VirtualBus`. The verified Simulink
+live path uses the `udp_multicast` CAN backend and requires CAN-FD because the
+encoded messages are 9 bytes long.
 
 This allows the complete prototype to run without physical CAN hardware.
 
@@ -259,7 +265,7 @@ The adapter performs:
           v
     normalized telemetry
 
-The adapter uses two CAN nodes for the prototype:
+The local loopback adapter uses two CAN nodes for the prototype:
 
     TX node
     simulated engine / ECU
@@ -268,6 +274,11 @@ The adapter uses two CAN nodes for the prototype:
     backend telemetry gateway
 
 Both nodes share the same CAN channel.
+
+For the Simulink live path, `simulink/udp_can_bridge.py` transmits the encoded
+CAN-FD frames over the configured UDP multicast channel. The backend
+`CANInputReceiver` listens to that multicast stream and verifies all 8 message
+IDs (`0x100`–`0x107`) before passing 20 decoded signals to the Digital Twin.
 
 The ML pipeline only receives the decoded normalized telemetry.
 
