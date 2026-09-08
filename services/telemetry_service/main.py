@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 
 # Add project root to path
@@ -8,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 import logging
 from typing import Dict, Any, Optional, List
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from backend.security import verify_internal_key
 from backend.simulation_engine import MissionSimulationEngine
@@ -25,6 +27,26 @@ sim_engine = MissionSimulationEngine(
     input_mode=os.getenv("TELEMETRY_INPUT_MODE", "simulink")
 )
 simulink_controller = SimulinkController()
+
+# MATLAB/Simulink starts asynchronously. Keep the normal per-frame CAN receive
+# timeout unchanged, but suppress a transient first-frame timeout during this
+# bounded startup window so the gateway can retry without reporting HTTP 500.
+SIMULINK_STARTUP_WARMUP_SECONDS = 20.0
+SIMULINK_STARTUP_PROBE_TIMEOUT_SECONDS = 1.0
+_simulink_startup_deadline: Optional[float] = None
+
+
+def _simulink_startup_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "WAITING_FOR_SIMULINK_TELEMETRY",
+            "message": "Simulink is starting; waiting for the first real CAN telemetry frame.",
+            "active_mission_id": sim_engine.active_mission_id,
+            "simulation_state": sim_engine.state,
+            "startup_warmup": True,
+        },
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -110,6 +132,7 @@ def list_missions():
 
 @app.post("/load_mission", dependencies=[Depends(verify_internal_key)])
 def load_mission(req: LoadMissionReq):
+    global _simulink_startup_deadline
     try:
         if sim_engine.input_mode == "simulink" and not 1 <= req.mission_id <= 100:
             raise ValueError(
@@ -117,6 +140,7 @@ def load_mission(req: LoadMissionReq):
             )
         sim_engine.load_mission(req.mission_id)
         simulink_controller.select_mission(req.mission_id)
+        _simulink_startup_deadline = None
         return {
             "message": f"Successfully loaded Mission {req.mission_id}",
             "active_mission_id": sim_engine.active_mission_id,
@@ -128,8 +152,13 @@ def load_mission(req: LoadMissionReq):
 
 @app.post("/start", dependencies=[Depends(verify_internal_key)])
 def start_simulation():
+    global _simulink_startup_deadline
     sim_engine.set_state("RUNNING")
     simulink_controller.start()
+    if sim_engine.input_mode == "simulink":
+        _simulink_startup_deadline = (
+            time.monotonic() + SIMULINK_STARTUP_WARMUP_SECONDS
+        )
     return {
         "message": "Simulation started",
         "state": sim_engine.state,
@@ -138,8 +167,10 @@ def start_simulation():
 
 @app.post("/pause", dependencies=[Depends(verify_internal_key)])
 def pause_simulation():
+    global _simulink_startup_deadline
     sim_engine.set_state("PAUSED")
     simulink_controller.stop()
+    _simulink_startup_deadline = None
     return {
         "message": "Simulation paused",
         "state": sim_engine.state,
@@ -148,6 +179,7 @@ def pause_simulation():
 
 @app.post("/step", dependencies=[Depends(verify_internal_key)])
 def step_simulation(force: bool = False):
+    global _simulink_startup_deadline
     if sim_engine.mission_df is None:
         raise HTTPException(status_code=400, detail="No active mission loaded")
     
@@ -163,7 +195,38 @@ def step_simulation(force: bool = False):
             "total_frames": len(sim_engine.mission_df)
         }
         
-    payload = sim_engine.step(advance=True)
+    try:
+        startup_probe = (
+            sim_engine.input_mode == "simulink"
+            and _simulink_startup_deadline is not None
+            and time.monotonic() <= _simulink_startup_deadline
+        )
+        payload = sim_engine.step(
+            advance=True,
+            telemetry_timeout=(
+                SIMULINK_STARTUP_PROBE_TIMEOUT_SECONDS
+                if startup_probe
+                else None
+            ),
+        )
+    except RuntimeError as exc:
+        is_first_frame_timeout = (
+            sim_engine.input_mode == "simulink"
+            and _simulink_startup_deadline is not None
+            and time.monotonic() <= _simulink_startup_deadline
+            and str(exc).startswith("Timed out waiting for CAN telemetry frame.")
+        )
+        if is_first_frame_timeout:
+            logger.info(
+                "Simulink startup warm-up still waiting for Mission %s telemetry.",
+                sim_engine.active_mission_id,
+            )
+            return _simulink_startup_response()
+        raise
+
+    # The first successful decoded sample ends startup warm-up. Subsequent
+    # receive failures retain the normal error behavior.
+    _simulink_startup_deadline = None
     if payload is None:
         raise HTTPException(status_code=400, detail="End of mission reached")
     

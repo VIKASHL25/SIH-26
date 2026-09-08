@@ -223,8 +223,16 @@ class MissionSimulationEngine:
             self.can_receiver.close()
             self.can_receiver = None
 
-    def step(self, advance: bool = True) -> Optional[Dict[str, Any]]:
-        """Advances simulation by 1 tick (if advance=True) and evaluates all 4 models."""
+    def step(
+        self,
+        advance: bool = True,
+        telemetry_timeout: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Advances simulation by 1 tick and evaluates all 4 models.
+
+        ``telemetry_timeout`` is used only by the Simulink startup probe. The
+        normal Simulink per-frame receive timeout remains 10 seconds.
+        """
         if self.mission_df is None or self.mission_df.empty:
             return None
 
@@ -268,7 +276,11 @@ class MissionSimulationEngine:
         elif self.input_mode == "simulink":
             # Simulink -> UDP -> CAN-FD -> RX path.
             decoded_telemetry = self.can_receiver.receive_telemetry(
-                timeout=10.0
+                timeout=(
+                    10.0
+                    if telemetry_timeout is None
+                    else max(0.05, float(telemetry_timeout))
+                )
             )
 
         else:
