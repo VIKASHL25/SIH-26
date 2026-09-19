@@ -1,6 +1,3 @@
 {
-  "anomaly_detection": "8c812b2c3ca03fc359d3ba2f39fe43244b0c3ec763ab7cfffb180396cc092f98",
-  "degradation_estimation": "91f802a02f1a362ef7ababf3094ecaa9f16cd84dcc7f8cf556177ed3b5c9136b",
-  "fault_classification": "8ce863f828d78ac3e939ef1d66ad7b377c472fa12ea90cd592ed622e849a64f4",
-  "rul_prediction": "5bdd88c15de3a23cb60233efccca8d16f72ee2b6c1e3aaa1e1ac08dd592f422f"
+  "fault_classification": "93aa1d15a40ca4d4b8e2c2e4521d72a3cad03f8f1031d9e363f37e0a747869e3"
 }

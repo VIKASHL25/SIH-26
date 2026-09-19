@@ -1,0 +1,137 @@
+{
+  "created_at_utc": "2026-09-19T19:49:10Z",
+  "problem_statement": "SIH 2026 / DRDO PS 26054 - MALE UAV aero piston engine fault detection",
+  "source_data": "../MALE_UAV_aero_piston_engine_final_100k.csv",
+  "n_rows": 100000,
+  "n_missions": 100,
+  "feature_source": "fault_features_batch.py, verified against backend/feature_engine.py (max abs diff 1.5e-11 across all 55 features on a held-out mission)",
+  "model_params": {
+    "subsample": 1.0,
+    "n_estimators": 300,
+    "min_child_weight": 3,
+    "max_depth": 4,
+    "learning_rate": 0.08,
+    "colsample_bytree": 0.9
+  },
+  "classes": [
+    "injector_degradation",
+    "lubrication_degradation",
+    "misfire",
+    "normal",
+    "overheating",
+    "sensor_fault"
+  ],
+  "metrics": {
+    "macro_roc_auc_ovr": 1.0,
+    "cv_best_macro_f1": 0.9984,
+    "per_class_report": {
+      "injector_degradation": {
+        "precision": 0.9976621858562245,
+        "recall": 0.9994145199063232,
+        "f1-score": 0.9985375840889149,
+        "support": 1708.0
+      },
+      "lubrication_degradation": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 1708.0
+      },
+      "misfire": {
+        "precision": 1.0,
+        "recall": 0.9985955056179775,
+        "f1-score": 0.9992972593113141,
+        "support": 712.0
+      },
+      "normal": {
+        "precision": 0.9996104907816151,
+        "recall": 0.9998052074540614,
+        "f1-score": 0.9997078396364226,
+        "support": 15401.0
+      },
+      "overheating": {
+        "precision": 1.0,
+        "recall": 0.9962825278810409,
+        "f1-score": 0.9981378026070763,
+        "support": 807.0
+      },
+      "sensor_fault": {
+        "precision": 1.0,
+        "recall": 0.9969879518072289,
+        "f1-score": 0.9984917043740573,
+        "support": 664.0
+      },
+      "accuracy": 0.9995238095238095,
+      "macro avg": {
+        "precision": 0.9995454461063066,
+        "recall": 0.9985142854444385,
+        "f1-score": 0.9990286983362976,
+        "support": 21000.0
+      },
+      "weighted avg": {
+        "precision": 0.9995241991414326,
+        "recall": 0.9995238095238095,
+        "f1-score": 0.9995237132810643,
+        "support": 21000.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        1707,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1708,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        0,
+        711,
+        0,
+        0,
+        0
+      ],
+      [
+        3,
+        0,
+        0,
+        15398,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        804,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        2,
+        0,
+        662
+      ]
+    ],
+    "confusion_matrix_labels": [
+      "injector_degradation",
+      "lubrication_degradation",
+      "misfire",
+      "normal",
+      "overheating",
+      "sensor_fault"
+    ]
+  }
+}
