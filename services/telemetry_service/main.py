@@ -20,6 +20,11 @@ logger = logging.getLogger("TelemetryMicroservice")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+from dotenv import load_dotenv
+
+# Load environment configuration from .env
+load_dotenv()
+
 # Global simulation engine instance
 # Live dashboard input is Simulink -> UDP -> CAN. Keep CSV available for
 # standalone/replay callers through TELEMETRY_INPUT_MODE=csv.

@@ -26,8 +26,8 @@ end
 
 %% Project paths
 
-project_root = '/Users/dishatp/Desktop/SIH-26';
-
+current_dir = fileparts(mfilename('fullpath'));
+project_root = fullfile(current_dir, '..');
 dataset_path = fullfile( ...
     project_root, ...
     'data', ...

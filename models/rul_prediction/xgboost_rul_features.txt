@@ -1,4 +1,3 @@
-timestamp_hours
 altitude_m
 ambient_temp_C
 pressure_kPa

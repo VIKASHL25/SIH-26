@@ -31,20 +31,22 @@ class DigitalTwinFeatureEngine:
         sample = dict(DEFAULT_SENSOR_DEFAULTS)
         sample.update(raw_sample)
 
-        # Handle column naming variations (e.g. throttle vs throttle_pct)
-        if "throttle" in raw_sample and "throttle_pct" not in raw_sample:
-            sample["throttle_pct"] = float(raw_sample["throttle"])
-        elif "throttle_pct" in raw_sample:
-            sample["throttle"] = float(raw_sample["throttle_pct"])
+        # Handle throttle and load fractional (0.0-1.0) vs percentage (0-100%) representations
+        raw_throttle = float(raw_sample.get("throttle_pct", raw_sample.get("throttle", sample.get("throttle_pct", 70.0))))
+        if raw_throttle > 1.0:
+            sample["throttle_pct"] = raw_throttle
+            sample["throttle"] = raw_throttle / 100.0
         else:
-            sample["throttle"] = sample["throttle_pct"]
+            sample["throttle"] = raw_throttle
+            sample["throttle_pct"] = raw_throttle * 100.0
 
-        if "load" in raw_sample and "load_pct" not in raw_sample:
-            sample["load_pct"] = float(raw_sample["load"])
-        elif "load_pct" in raw_sample:
-            sample["load"] = float(raw_sample["load_pct"])
+        raw_load = float(raw_sample.get("load_pct", raw_sample.get("load", sample.get("load_pct", 70.0))))
+        if raw_load > 1.0:
+            sample["load_pct"] = raw_load
+            sample["load"] = raw_load / 100.0
         else:
-            sample["load"] = sample["load_pct"]
+            sample["load"] = raw_load
+            sample["load_pct"] = raw_load * 100.0
 
         # Ensure timestamp_hours is available for RUL features if present
         if "timestamp_s" in raw_sample and "timestamp_hours" not in sample:

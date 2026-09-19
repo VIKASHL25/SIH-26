@@ -362,6 +362,11 @@ class MissionSimulationEngine:
             **decoded_telemetry,
         }
 
+        # Apply synthetic fault overrides continuously across all modes
+        for param, delta_or_val in self.fault_overrides.items():
+            if param in raw_row:
+                raw_row[param] = float(raw_row[param]) + delta_or_val
+
         # Preserve Digital Twin reference values used by the feature engine.
         for key in (
             "expected_rpm",
@@ -406,8 +411,51 @@ class MissionSimulationEngine:
             degradation_result=predictions["degradation_estimation"],
         )
 
+        # Mission Duration & Feasibility Tracking (Feedback Items 11 & 15)
+        planned_duration_h = float(getattr(self, "planned_mission_duration_hours", 10.0))
+        elapsed_h = float(raw_row.get("timestamp_s", self.current_frame_idx)) / 3600.0
+        remaining_mission_h = max(0.0, planned_duration_h - elapsed_h)
+
+        rul_pred = predictions.get("rul_prediction", {})
+        rul_hours = rul_pred.get("predicted_rul_hours")
+        rul_p10 = rul_pred.get("rul_lower_bound_p10")
+        rul_std = rul_pred.get("uncertainty_std_hours", 2.0) or 2.0
+        health_pct = predictions["degradation_estimation"]["estimated_health_pct"]
+
+        mission_feasibility = {
+            "planned_mission_duration_hours": round(planned_duration_h, 2),
+            "mission_elapsed_hours": round(elapsed_h, 2),
+            "mission_remaining_time_hours": round(remaining_mission_h, 2),
+            "mission_completion_margin_hours": None,
+            "mission_feasibility_status": "COLLECTING_HISTORY" if rul_hours is None else "MISSION_CAPABLE",
+            "mission_completion_probability_pct": None,
+            "maintenance_trigger": "NOMINAL"
+        }
+
+        if rul_hours is not None:
+            margin = rul_hours - remaining_mission_h
+            mission_feasibility["mission_completion_margin_hours"] = round(margin, 2)
+
+            import math
+            z = (rul_hours - remaining_mission_h) / max(0.5, float(rul_std))
+            prob_norm = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+            mission_feasibility["mission_completion_probability_pct"] = round(prob_norm * 100.0, 1)
+
+            if rul_hours < remaining_mission_h or health_pct < 25.0:
+                mission_feasibility["mission_feasibility_status"] = "CRITICAL_INSUFFICIENT_RUL"
+                mission_feasibility["maintenance_trigger"] = "URGENT_MAINTENANCE_REQUIRED / ABORT_MISSION_RTB"
+            elif (rul_p10 is not None and rul_p10 < remaining_mission_h) or (rul_hours < remaining_mission_h * 1.25):
+                mission_feasibility["mission_feasibility_status"] = "MISSION_AT_RISK"
+                mission_feasibility["maintenance_trigger"] = "MISSION_RISK_ELEVATED_MONITOR_HEALTH"
+            elif rul_hours < 15.0:
+                mission_feasibility["mission_feasibility_status"] = "MISSION_CAPABLE"
+                mission_feasibility["maintenance_trigger"] = "DEPOT_SERVICE_MANDATORY_POST_FLIGHT"
+            else:
+                mission_feasibility["mission_feasibility_status"] = "MISSION_CAPABLE"
+                mission_feasibility["maintenance_trigger"] = "NOMINAL_NO_MAINTENANCE_TRIGGERED"
+
         # Generate Maintenance Advisory with State Tracking (anti-spam)
-        advisories = self._generate_maintenance_advisories(predictions, fv["clean_sample"])
+        advisories = self._generate_maintenance_advisories(predictions, fv["clean_sample"], remaining_mission_h)
 
         # Generate Explainable AI (XAI) multi-model explanations
         xai_payload = self.xai_engine.explain(fv, predictions, self.model_manager)
@@ -460,6 +508,7 @@ class MissionSimulationEngine:
             "degradation_estimation": predictions["degradation_estimation"],
             "fault_classification": predictions["fault_classification"],
             "rul_prediction": predictions["rul_prediction"],
+            "mission_feasibility": mission_feasibility,
             "model_metadata": predictions.get("metadata", {}),
             "advisories": advisories,
             "xai": xai_payload
@@ -471,7 +520,7 @@ class MissionSimulationEngine:
         """Returns the current telemetry frame evaluated across models without advancing the frame index."""
         return self.step(advance=False)
 
-    def _generate_maintenance_advisories(self, predictions: dict, clean_sample: dict) -> List[str]:
+    def _generate_maintenance_advisories(self, predictions: dict, clean_sample: dict, remaining_mission_h: float = 10.0) -> List[str]:
         """
         Generates maintenance advisories, firing alerts only on state level changes to eliminate tick-by-tick spam.
         """
@@ -481,6 +530,7 @@ class MissionSimulationEngine:
         confidence = predictions["fault_classification"]["confidence"]
         rul_pred = predictions["rul_prediction"]
         rul_hours = rul_pred.get("predicted_rul_hours")
+        rul_p10 = rul_pred.get("rul_lower_bound_p10")
         is_anomaly = predictions["anomaly_detection"]["is_anomaly"]
         health_pct = predictions["degradation_estimation"]["estimated_health_pct"]
 
@@ -537,14 +587,27 @@ class MissionSimulationEngine:
                 logger.warning(msg)
             self.last_alert_levels["DEGRADATION"] = deg_state
 
-        # 4. RUL LOW Alert State (< 10.0 hours remaining)
-        rul_state = "LOW" if (rul_hours is not None and rul_hours < 10.0) else "OK"
-        if rul_state != self.last_alert_levels.get("RUL_LOW"):
-            if rul_state == "LOW":
-                msg = f"URGENT: Low RUL remaining ({rul_hours:.1f} hours). Plan engine replacement before next mission."
+        # 4. RUL & MISSION FEASIBILITY Alert State (Feedback Items 11 & 15)
+        if rul_hours is not None:
+            if rul_hours < remaining_mission_h:
+                rul_state = "CRITICAL_ABORT"
+            elif (rul_p10 is not None and rul_p10 < remaining_mission_h) or rul_hours < 15.0:
+                rul_state = "WARNING_RISK"
+            else:
+                rul_state = "NOMINAL"
+        else:
+            rul_state = "BUFFERING"
+
+        if rul_state != self.last_alert_levels.get("RUL_MISSION_FEASIBILITY"):
+            if rul_state == "CRITICAL_ABORT":
+                msg = f"CRITICAL: Remaining Useful Life ({rul_hours:.1f}h) is below required mission duration ({remaining_mission_h:.1f}h). Initiate RTB."
                 advisories.append(msg)
                 logger.warning(msg)
-            self.last_alert_levels["RUL_LOW"] = rul_state
+            elif rul_state == "WARNING_RISK":
+                msg = f"WARNING: Low RUL margin detected ({rul_hours:.1f}h remaining, P10: {rul_p10 or '--'}h). Plan depot maintenance."
+                advisories.append(msg)
+                logger.warning(msg)
+            self.last_alert_levels["RUL_MISSION_FEASIBILITY"] = rul_state
 
         # 5. VIBRATION ROLLING BASELINE Alert State (Mean +/- 3*Std)
         vib_val = clean_sample.get("vibration_rms", 0.0)

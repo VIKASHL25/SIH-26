@@ -112,9 +112,20 @@ export interface RulPrediction {
   rul_lower_bound_p10?: number | null;
   rul_upper_bound_p90?: number | null;
   uncertainty_std_hours?: number | null;
+  confidence_interval_90pct?: [number, number] | null;
   confidence_level?: 'HIGH' | 'MEDIUM' | 'LOW' | string;
   records_available?: number;
   records_required?: number;
+}
+
+export interface MissionFeasibility {
+  planned_mission_duration_hours: number;
+  mission_elapsed_hours: number;
+  mission_remaining_time_hours: number;
+  mission_completion_margin_hours: number | null;
+  mission_feasibility_status: 'MISSION_CAPABLE' | 'MISSION_AT_RISK' | 'CRITICAL_INSUFFICIENT_RUL' | 'COLLECTING_HISTORY' | string;
+  mission_completion_probability_pct: number | null;
+  maintenance_trigger: string;
 }
 
 export interface XaiDriver {
@@ -170,6 +181,7 @@ export interface TelemetryFrame {
   degradation_estimation: DegradationEstimation;
   fault_classification: FaultClassification;
   rul_prediction: RulPrediction;
+  mission_feasibility?: MissionFeasibility;
   xai?: XaiPayload;
   xai_explanation?: XaiPayload;
   advisories?: string[];

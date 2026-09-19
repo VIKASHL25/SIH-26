@@ -47,8 +47,8 @@ class SimulinkController:
     def select_mission(self, mission_id: int) -> None:
         """Select a mission without starting Simulink."""
 
-        if not isinstance(mission_id, int) or not 1 <= mission_id <= 100:
-            raise ValueError("mission_id must be an integer between 1 and 100.")
+        if not isinstance(mission_id, int) or not (1 <= mission_id <= 100 or mission_id == 999):
+            raise ValueError("mission_id must be an integer between 1 and 100, or 999.")
 
         with self._lock:
             # If another mission is currently streaming, stop it first.
@@ -76,6 +76,10 @@ class SimulinkController:
                     "No mission selected; defaulting to Mission 1."
                 )
 
+            if self.selected_mission == 999:
+                logger.info("Mission 999 is internal demo flight test; skipping external MATLAB process.")
+                return
+
             if self.is_running:
                 logger.info(
                     "Simulink Mission %d is already running.",
@@ -100,24 +104,34 @@ class SimulinkController:
                 matlab_command,
             )
 
-            self.process = subprocess.Popen(
-                [
-                    self.matlab_command,
-                    "-batch",
-                    matlab_command,
-                ],
-                cwd=self.simulink_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+            try:
+                self.process = subprocess.Popen(
+                    [
+                        self.matlab_command,
+                        "-batch",
+                        matlab_command,
+                    ],
+                    cwd=self.simulink_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
 
-            threading.Thread(
-                target=self._read_output,
-                args=(self.process, mission_id),
-                daemon=True,
-            ).start()
+                threading.Thread(
+                    target=self._read_output,
+                    args=(self.process, mission_id),
+                    daemon=True,
+                ).start()
+            except FileNotFoundError:
+                logger.warning(
+                    f"MATLAB executable '{self.matlab_command}' not found. "
+                    f"If you are not running MATLAB locally, telemetry will stream from the internal simulation/CSV engine or external UDP bridge."
+                )
+                self.process = None
+            except Exception as e:
+                logger.warning(f"Could not start MATLAB process: {e}")
+                self.process = None
 
     def stop(self) -> None:
         """Stop the currently running Simulink replay."""

@@ -26,3 +26,4 @@ motor>=3.3.0
 # CAN Bus & Hardware Interface Layer
 python-can>=4.5.0
 cantools>=40.0.0
+msgpack>=1.0.0

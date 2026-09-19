@@ -25,3 +25,7 @@ slprj/
 *.slxc
 *.asv
 .envy
+
+# Model training datasets
+models/rul_prediction/data/
+

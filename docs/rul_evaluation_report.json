@@ -1,0 +1,116 @@
+{
+  "overall_metrics": {
+    "mae_hours": 26.72,
+    "rmse_hours": 37.26,
+    "r2_score": 0.7369,
+    "mape_pct": 52.04,
+    "mean_error_hours": 4.48,
+    "error_p25_hours": -14.34,
+    "error_p50_median": 4.64,
+    "error_p75_hours": 20.28,
+    "total_test_samples": 24435
+  },
+  "lifecycle_metrics": {
+    "early_life_gt_200h": {
+      "mae_hours": 50.05,
+      "rmse_hours": 57.41,
+      "r2_score": -2.3699,
+      "mape_pct": 20.13,
+      "mean_error_hours": -46.49,
+      "error_p25_hours": -74.93,
+      "error_p50_median": -44.09,
+      "error_p75_hours": -28.61,
+      "total_test_samples": 2933
+    },
+    "mid_life_50_to_200h": {
+      "mae_hours": 27.44,
+      "rmse_hours": 37.65,
+      "r2_score": 0.2041,
+      "mape_pct": 28.58,
+      "mean_error_hours": 11.41,
+      "error_p25_hours": -12.99,
+      "error_p50_median": 5.33,
+      "error_p75_hours": 32.79,
+      "total_test_samples": 14579
+    },
+    "late_life_lt_50h": {
+      "mae_hours": 15.33,
+      "rmse_hours": 22.79,
+      "r2_score": -1.4777,
+      "mape_pct": 116.45,
+      "mean_error_hours": 11.47,
+      "error_p25_hours": 0.56,
+      "error_p50_median": 8.89,
+      "error_p75_hours": 17.53,
+      "total_test_samples": 6923
+    }
+  },
+  "fault_mode_metrics": {
+    "injector_degradation": {
+      "mae_hours": 44.18,
+      "rmse_hours": 53.25,
+      "r2_score": -1.3543,
+      "mape_pct": 108.94,
+      "mean_error_hours": 44.14,
+      "error_p25_hours": 19.03,
+      "error_p50_median": 39.15,
+      "error_p75_hours": 64.16,
+      "total_test_samples": 1222
+    },
+    "lubrication_degradation": {
+      "mae_hours": 25.72,
+      "rmse_hours": 32.47,
+      "r2_score": 0.7999,
+      "mape_pct": 48.4,
+      "mean_error_hours": 0.88,
+      "error_p25_hours": -27.47,
+      "error_p50_median": 2.41,
+      "error_p75_hours": 19.44,
+      "total_test_samples": 6504
+    },
+    "misfire": {
+      "mae_hours": 19.9,
+      "rmse_hours": 28.39,
+      "r2_score": 0.8534,
+      "mape_pct": 34.85,
+      "mean_error_hours": -7.24,
+      "error_p25_hours": -21.25,
+      "error_p50_median": -3.36,
+      "error_p75_hours": 6.91,
+      "total_test_samples": 5293
+    },
+    "normal_wear": {
+      "mae_hours": 22.97,
+      "rmse_hours": 38.67,
+      "r2_score": 0.6252,
+      "mape_pct": 62.05,
+      "mean_error_hours": 14.8,
+      "error_p25_hours": -5.98,
+      "error_p50_median": 5.24,
+      "error_p75_hours": 18.52,
+      "total_test_samples": 3613
+    },
+    "overheating": {
+      "mae_hours": 37.17,
+      "rmse_hours": 45.64,
+      "r2_score": 0.1876,
+      "mape_pct": 84.55,
+      "mean_error_hours": 36.76,
+      "error_p25_hours": 15.84,
+      "error_p50_median": 33.55,
+      "error_p75_hours": 52.99,
+      "total_test_samples": 3243
+    },
+    "vibration_wear": {
+      "mae_hours": 26.94,
+      "rmse_hours": 39.67,
+      "r2_score": 0.7672,
+      "mape_pct": 31.07,
+      "mean_error_hours": -18.58,
+      "error_p25_hours": -33.82,
+      "error_p50_median": -6.86,
+      "error_p75_hours": 6.6,
+      "total_test_samples": 4560
+    }
+  }
+}

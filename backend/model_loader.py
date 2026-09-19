@@ -220,35 +220,29 @@ class DigitalTwinModelManager:
 
     def apply_temporal_filter(self, raw_rul: float, health_pct: Optional[float] = None, degradation_index: Optional[float] = None) -> float:
         """
-        Applies Exponential Moving Average (EMA, alpha=0.12), Slew Rate Limiting,
-        and Failure-Aware Degradation Lifecycle Anchoring down to 0 RUL.
+        Applies Exponential Moving Average (EMA, alpha=0.15) and Slew Rate Limiting.
+        Purely physics and telemetry driven, with zero dependence on arbitrary health% heuristic anchors.
+        Enforces terminal failure zeroing only when degradation index >= 0.98.
         """
         raw_rul = max(0.0, float(raw_rul))
 
-        # Dynamic Degradation & Failure Correction Anchor
-        if health_pct is not None:
-            health_fraction = max(0.0, min(1.0, health_pct / 100.0))
-            if degradation_index is not None and degradation_index >= 0.98:
-                # Engine failure state
-                raw_rul = 0.0
-            else:
-                # Dynamic physical anchor proportional to engine health (e.g. 100% -> 50h, 50% -> 25h, 0% -> 0h)
-                health_target = health_fraction * 50.0
-                raw_rul = 0.3 * raw_rul + 0.7 * health_target
+        # Terminal failure state enforcement
+        if degradation_index is not None and degradation_index >= 0.98:
+            raw_rul = 0.0
 
         if self.previous_rul is None:
             filtered = raw_rul
         else:
-            # Low-pass filter step (alpha = 0.12)
-            alpha = 0.12
+            # Low-pass filter step (alpha = 0.15)
+            alpha = 0.15
             filtered = alpha * raw_rul + (1.0 - alpha) * self.previous_rul
             
-            # Slew-rate limiting per second (max +0.5h increase / -2.0h decrease per tick)
+            # Slew-rate limiting per tick (max +1.0h increase / -3.0h decrease per tick)
             delta = filtered - self.previous_rul
-            if delta > 0.5:
-                filtered = self.previous_rul + 0.5
-            elif delta < -2.0:
-                filtered = self.previous_rul - 2.0
+            if delta > 1.0:
+                filtered = self.previous_rul + 1.0
+            elif delta < -3.0:
+                filtered = self.previous_rul - 3.0
 
         filtered = max(0.0, filtered)
         self.previous_rul = filtered
