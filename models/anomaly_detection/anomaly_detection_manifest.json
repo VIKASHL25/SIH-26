@@ -1,0 +1,38 @@
+{
+  "created_at_utc": "2026-09-19T21:13:49Z",
+  "problem_statement": "SIH 2026 / DRDO PS 26054 - MALE UAV aero piston engine anomaly detection",
+  "source_data": "../MALE_UAV_aero_piston_engine_final_100k.csv",
+  "n_rows": 100000,
+  "n_missions": 100,
+  "feature_source": "anomaly_features_batch.py, verified against backend/feature_engine.py (exact match, max abs diff 0.0 on a held-out mission)",
+  "feature_cols": [
+    "cht_C",
+    "egt_C",
+    "oil_temperature_C",
+    "oil_pressure_bar",
+    "vibration_rms",
+    "battery_voltage_V",
+    "alternator_current_A",
+    "alternator_health",
+    "injection_timing_deg",
+    "cht_residual",
+    "egt_residual",
+    "rpm_residual",
+    "physics_residual_C"
+  ],
+  "training_note": "Fit on 'normal'-labeled rows only; fault labels used solely for hyperparameter selection and evaluation, never for fitting.",
+  "model_params": {
+    "n_estimators": 200,
+    "max_samples": 4096,
+    "contamination": 0.02
+  },
+  "anomaly_threshold": 0.0,
+  "metrics": {
+    "cv_best_roc_auc": 0.9734,
+    "test_roc_auc": 0.9716,
+    "test_precision_at_threshold": 0.9404,
+    "test_recall_at_threshold": 0.8539,
+    "mean_detection_latency_timesteps": 39.0,
+    "n_fault_missions_evaluated": 7
+  }
+}

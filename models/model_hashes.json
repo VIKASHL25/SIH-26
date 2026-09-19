@@ -1,3 +1,5 @@
 {
-  "fault_classification": "93aa1d15a40ca4d4b8e2c2e4521d72a3cad03f8f1031d9e363f37e0a747869e3"
+  "fault_classification": "93aa1d15a40ca4d4b8e2c2e4521d72a3cad03f8f1031d9e363f37e0a747869e3",
+  "anomaly_detection": "cd06869baad43d71324c4bdf725618e94e8b598548b0bdf52356984820ff58ab",
+  "anomaly_scaler_unverified": "3656f4daed86a8582775dbc0b5e322fedd1617b0ba35c5033a6aa2c4fd3a6b67"
 }
