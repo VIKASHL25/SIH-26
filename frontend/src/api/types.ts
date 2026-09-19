@@ -56,6 +56,22 @@ export interface PhysicsModel {
   fuel_air_ratio?: number;
 }
 
+export interface DiagnosticResult {
+  anomaly_detected: boolean;
+  anomaly_score: number;
+  fault_id: string | null;
+  fault: string | null;
+  subsystem: string | null;
+  fault_confidence: number;
+  severity: string;
+  RUL: number | null;
+  time_to_critical: number | null;
+  contributing_features: string[];
+  explanation: string;
+  maintenance_advisory: string;
+  possible_sensor_drift: boolean;
+}
+
 export interface AnomalyDetection {
   is_anomaly: boolean;
   anomaly_score: number;
@@ -150,6 +166,7 @@ export interface TelemetryFrame {
   telemetry: TelemetryData;
   physics_model: PhysicsModel;
   anomaly_detection: AnomalyDetection;
+  diagnostic: DiagnosticResult;
   degradation_estimation: DegradationEstimation;
   fault_classification: FaultClassification;
   rul_prediction: RulPrediction;

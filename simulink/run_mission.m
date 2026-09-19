@@ -26,7 +26,7 @@ end
 
 %% Project paths
 
-project_root = 'C:\Users\User\OneDrive\Desktop\Projects\SIH\SIH-26';
+project_root = '/Users/dishatp/Desktop/SIH-26';
 
 dataset_path = fullfile( ...
     project_root, ...

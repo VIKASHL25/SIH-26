@@ -154,11 +154,13 @@ def load_mission(req: LoadMissionReq):
 def start_simulation():
     global _simulink_startup_deadline
     sim_engine.set_state("RUNNING")
-    simulink_controller.start()
+
     if sim_engine.input_mode == "simulink":
+        simulink_controller.start()
         _simulink_startup_deadline = (
             time.monotonic() + SIMULINK_STARTUP_WARMUP_SECONDS
         )
+
     return {
         "message": "Simulation started",
         "state": sim_engine.state,

@@ -43,14 +43,32 @@ export const DiagnosticsPanel: React.FC = () => {
     },
   };
 
+  const diagnostic = currentFrame?.diagnostic || {
+    anomaly_detected: false,
+    anomaly_score: 0,
+    fault_id: null,
+    subsystem: null,
+    fault: 'normal',
+    fault_confidence: 0,
+    severity: 'NOMINAL',
+    RUL: null,
+    time_to_critical: null,
+    contributing_features: [],
+    explanation: 'System operating within nominal limits.',
+    maintenance_advisory: 'No maintenance action required.',
+    possible_sensor_drift: false,
+  };
+
   // Degradation Health color coding
   const healthPct = deg.estimated_health_pct;
+
   const healthColor =
     healthPct < 60
       ? 'text-red-400'
       : healthPct < 80
       ? 'text-amber-400'
       : 'text-emerald-400';
+
   const healthBg =
     healthPct < 60
       ? 'bg-red-500'
@@ -58,10 +76,20 @@ export const DiagnosticsPanel: React.FC = () => {
       ? 'bg-amber-500'
       : 'bg-emerald-500';
 
+  // Unified diagnostic severity color
+  const severityColor =
+    diagnostic.severity === 'CRITICAL' ||
+    diagnostic.severity === 'HIGH'
+      ? 'text-red-400'
+      : diagnostic.severity === 'WARNING' ||
+        diagnostic.severity === 'MODERATE'
+      ? 'text-amber-300'
+      : 'text-emerald-400';
+
   // Fault probabilities formatted
-  const faultEntries = Object.entries(fault.fault_probabilities || { normal: 1.0 }).sort(
-    (a, b) => b[1] - a[1]
-  );
+  const faultEntries = Object.entries(
+    fault.fault_probabilities || { normal: 1.0 }
+  ).sort((a, b) => b[1] - a[1]);
 
   const faultDisplayNames: Record<string, string> = {
     normal: 'Nominal Envelope',
@@ -73,41 +101,55 @@ export const DiagnosticsPanel: React.FC = () => {
 
   return (
     <div className="bg-avionics-surface border border-avionics-border rounded-lg p-3.5 space-y-4">
+
       {/* Header */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Brain className="w-4 h-4 text-cyan-400" />
+
           <h3 className="text-xs font-mono font-bold tracking-wider text-slate-200 uppercase">
             AI/ML Predictive Health & Diagnostics
           </h3>
         </div>
+
         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
           4 MODELS SYNCHRONIZED
         </span>
       </div>
 
+      {/* Existing diagnostic cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+
         {/* 1. DEGRADATION ESTIMATION GAUGE */}
         <div className="bg-avionics-card rounded-lg border border-slate-800 p-3 flex flex-col justify-between">
+
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <TrendingDown className="w-3.5 h-3.5 text-cyan-400" />
               Engine Health Index
             </span>
-            <span className="text-[10px] font-mono text-slate-500">XGBoost Regressor</span>
+
+            <span className="text-[10px] font-mono text-slate-500">
+              XGBoost Regressor
+            </span>
           </div>
 
           <div className="my-3 flex items-center justify-between">
             <div>
-              <div className={`text-3xl font-mono font-bold tracking-tight ${healthColor}`}>
+              <div
+                className={`text-3xl font-mono font-bold tracking-tight ${healthColor}`}
+              >
                 {healthPct.toFixed(1)}%
               </div>
+
               <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                Degradation Index: <span className="text-slate-200">{deg.degradation_index.toFixed(3)}</span>
+                Degradation Index:{' '}
+                <span className="text-slate-200">
+                  {deg.degradation_index.toFixed(3)}
+                </span>
               </div>
             </div>
 
-            {/* Circular meter mini preview */}
             <div className="relative w-12 h-12 flex items-center justify-center">
               <svg className="w-12 h-12 transform -rotate-90">
                 <circle
@@ -118,37 +160,52 @@ export const DiagnosticsPanel: React.FC = () => {
                   strokeWidth="4"
                   fill="transparent"
                 />
+
                 <circle
                   cx="24"
                   cy="24"
                   r="20"
-                  stroke={healthPct < 60 ? '#EF4444' : healthPct < 80 ? '#F59E0B' : '#10B981'}
+                  stroke={
+                    healthPct < 60
+                      ? '#EF4444'
+                      : healthPct < 80
+                      ? '#F59E0B'
+                      : '#10B981'
+                  }
                   strokeWidth="4"
                   fill="transparent"
                   strokeDasharray={125.6}
-                  strokeDashoffset={125.6 - (125.6 * healthPct) / 100}
+                  strokeDashoffset={
+                    125.6 - (125.6 * healthPct) / 100
+                  }
                   strokeLinecap="round"
                 />
               </svg>
             </div>
           </div>
 
-          {/* Health progress bar */}
           <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
             <div
               className={`h-full ${healthBg} transition-all duration-300`}
-              style={{ width: `${Math.max(0, Math.min(100, healthPct))}%` }}
+              style={{
+                width: `${Math.max(
+                  0,
+                  Math.min(100, healthPct)
+                )}%`,
+              }}
             />
           </div>
         </div>
 
         {/* 2. REMAINING USEFUL LIFE (RUL) CARD */}
         <div className="bg-avionics-card rounded-lg border border-slate-800 p-3 flex flex-col justify-between">
+
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-cyan-400" />
               Remaining Useful Life
             </span>
+
             <span
               className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ${
                 rul.confidence_level === 'HIGH'
@@ -165,27 +222,36 @@ export const DiagnosticsPanel: React.FC = () => {
           <div className="my-2">
             {rul.status === 'COLLECTING_HISTORY' ? (
               <div className="py-2">
-                <span className="text-lg font-mono font-bold text-amber-400">BUFFERING</span>
+                <span className="text-lg font-mono font-bold text-amber-400">
+                  BUFFERING
+                </span>
+
                 <p className="text-[11px] font-mono text-slate-400">
-                  {rul.records_available || 0} / {rul.records_required || 13} frames buffered
+                  {rul.records_available || 0} /{' '}
+                  {rul.records_required || 13} frames buffered
                 </p>
               </div>
             ) : (
               <div>
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-3xl font-mono font-bold text-cyan-300">
-                    {rul.predicted_rul_hours !== null && rul.predicted_rul_hours !== undefined
+                    {rul.predicted_rul_hours !== null &&
+                    rul.predicted_rul_hours !== undefined
                       ? rul.predicted_rul_hours.toFixed(1)
                       : '--'}
                   </span>
-                  <span className="text-xs font-mono text-slate-400 font-semibold">HOURS</span>
+
+                  <span className="text-xs font-mono text-slate-400 font-semibold">
+                    HOURS
+                  </span>
                 </div>
 
-                {/* Confidence Bounds Band (P10 - P90) */}
                 <div className="text-[11px] font-mono text-slate-400 mt-1 flex items-center justify-between">
                   <span>90% CI:</span>
+
                   <span className="text-slate-200">
-                    {rul.rul_lower_bound_p10?.toFixed(1) || '--'}h — {rul.rul_upper_bound_p90?.toFixed(1) || '--'}h
+                    {rul.rul_lower_bound_p10?.toFixed(1) || '--'}h —{' '}
+                    {rul.rul_upper_bound_p90?.toFixed(1) || '--'}h
                   </span>
                 </div>
               </div>
@@ -194,13 +260,16 @@ export const DiagnosticsPanel: React.FC = () => {
 
           <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-800/80 flex justify-between">
             <span>Uncertainty ±σ:</span>
+
             <span className="text-slate-400">
-              {rul.uncertainty_std_hours ? `±${rul.uncertainty_std_hours.toFixed(2)} hrs` : 'N/A'}
+              {rul.uncertainty_std_hours
+                ? `±${rul.uncertainty_std_hours.toFixed(2)} hrs`
+                : 'N/A'}
             </span>
           </div>
         </div>
 
-        {/* 3. ANOMALY DETECTION (Isolation Forest) */}
+        {/* 3. ANOMALY DETECTION */}
         <div
           className={`rounded-lg border p-3 flex flex-col justify-between transition-all duration-300 ${
             anomaly.is_anomaly
@@ -211,37 +280,58 @@ export const DiagnosticsPanel: React.FC = () => {
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <AlertTriangle
-                className={`w-3.5 h-3.5 ${anomaly.is_anomaly ? 'text-red-400 animate-pulse' : 'text-cyan-400'}`}
+                className={`w-3.5 h-3.5 ${
+                  anomaly.is_anomaly
+                    ? 'text-red-400 animate-pulse'
+                    : 'text-cyan-400'
+                }`}
               />
+
               Anomaly Detection
             </span>
-            <span className="text-[10px] font-mono text-slate-500">Isolation Forest</span>
+
+            <span className="text-[10px] font-mono text-slate-500">
+              Isolation Forest
+            </span>
           </div>
 
           <div className="my-2">
             <div className="flex items-center gap-2">
               <span
                 className={`text-xl font-mono font-bold tracking-wider uppercase ${
-                  anomaly.is_anomaly ? 'text-red-400' : 'text-emerald-400'
+                  anomaly.is_anomaly
+                    ? 'text-red-400'
+                    : 'text-emerald-400'
                 }`}
               >
-                {anomaly.is_anomaly ? 'ANOMALY DETECTED' : 'ENVELOPE NOMINAL'}
+                {anomaly.is_anomaly
+                  ? 'ANOMALY DETECTED'
+                  : 'ENVELOPE NOMINAL'}
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2 mt-2 pt-1 font-mono text-[11px]">
               <div>
-                <span className="text-slate-500 text-[10px] block">ANOMALY SCORE</span>
+                <span className="text-slate-500 text-[10px] block">
+                  ANOMALY SCORE
+                </span>
+
                 <span
                   className={`font-semibold ${
-                    anomaly.anomaly_score > 0 ? 'text-red-400' : 'text-emerald-400'
+                    anomaly.anomaly_score > 0
+                      ? 'text-red-400'
+                      : 'text-emerald-400'
                   }`}
                 >
                   {anomaly.anomaly_score.toFixed(3)}
                 </span>
               </div>
+
               <div>
-                <span className="text-slate-500 text-[10px] block">DECISION FUNC</span>
+                <span className="text-slate-500 text-[10px] block">
+                  DECISION FUNC
+                </span>
+
                 <span className="text-slate-300 font-semibold">
                   {anomaly.decision_function.toFixed(3)}
                 </span>
@@ -254,19 +344,20 @@ export const DiagnosticsPanel: React.FC = () => {
           </div>
         </div>
 
-        {/* 4. MULTICLASS FAULT CLASSIFICATION (XGBoost) */}
+        {/* 4. MULTICLASS FAULT CLASSIFICATION */}
         <div className="bg-avionics-card rounded-lg border border-slate-800 p-3 flex flex-col justify-between">
+
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-cyan-400" />
               Fault Classification
             </span>
+
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-bold">
               {(fault.confidence * 100).toFixed(1)}% CONF
             </span>
           </div>
 
-          {/* Predicted class pill */}
           <div className="my-1.5">
             <div
               className={`px-2 py-1 rounded text-xs font-mono font-bold uppercase tracking-wide border ${
@@ -275,20 +366,24 @@ export const DiagnosticsPanel: React.FC = () => {
                   : 'bg-red-500/20 text-red-300 border-red-500/40 shadow-glow-critical'
               }`}
             >
-              {faultDisplayNames[fault.predicted_fault] || fault.predicted_fault.toUpperCase()}
+              {faultDisplayNames[fault.predicted_fault] ||
+                fault.predicted_fault.toUpperCase()}
             </div>
           </div>
 
-          {/* Fault probabilities distribution bars */}
           <div className="space-y-1 mt-1">
             {faultEntries.slice(0, 3).map(([key, prob]) => (
               <div key={key} className="text-[10px] font-mono">
                 <div className="flex justify-between text-slate-400 mb-0.5">
-                  <span className="truncate">{faultDisplayNames[key] || key}</span>
+                  <span className="truncate">
+                    {faultDisplayNames[key] || key}
+                  </span>
+
                   <span className="text-slate-200 font-semibold ml-1">
                     {(prob * 100).toFixed(1)}%
                   </span>
                 </div>
+
                 <div className="w-full bg-slate-900 h-1 rounded-full overflow-hidden">
                   <div
                     className={`h-full ${
@@ -298,7 +393,9 @@ export const DiagnosticsPanel: React.FC = () => {
                         ? 'bg-red-400'
                         : 'bg-cyan-400'
                     }`}
-                    style={{ width: `${Math.max(2, prob * 100)}%` }}
+                    style={{
+                      width: `${Math.max(2, prob * 100)}%`,
+                    }}
                   />
                 </div>
               </div>
@@ -306,6 +403,141 @@ export const DiagnosticsPanel: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* UNIFIED DIAGNOSTIC RESULT */}
+      <div
+        className={`rounded-lg border p-3 transition-all duration-300 ${
+          diagnostic.severity === 'CRITICAL' ||
+          diagnostic.severity === 'HIGH'
+            ? 'bg-red-950/20 border-red-500/50 shadow-glow-critical'
+            : diagnostic.severity === 'WARNING' ||
+              diagnostic.severity === 'MODERATE'
+            ? 'bg-amber-950/10 border-amber-500/40'
+            : 'bg-avionics-card border-emerald-900/40'
+        }`}
+      >
+
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Brain className="w-4 h-4 text-cyan-400" />
+
+            <span className="text-xs font-mono font-bold text-slate-200 uppercase tracking-wider">
+              Unified Diagnostic Assessment
+            </span>
+          </div>
+
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-cyan-300">
+            DIGITAL TWIN + ML
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+
+          {/* Fault ID */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block">
+              FAULT ID
+            </span>
+
+            <span className="text-sm text-cyan-300 font-mono font-bold">
+              {diagnostic.fault_id || 'NONE'}
+            </span>
+          </div>
+
+          {/* Fault */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block">
+              FAULT
+            </span>
+
+            <span className="text-sm text-slate-200 font-mono">
+              {diagnostic.fault || 'NORMAL'}
+            </span>
+          </div>
+
+          {/* Subsystem */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block">
+              SUBSYSTEM
+            </span>
+
+            <span className="text-sm text-slate-200 font-mono">
+              {diagnostic.subsystem || 'NONE'}
+            </span>
+          </div>
+
+          {/* Confidence */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block">
+              CONFIDENCE
+            </span>
+
+            <span className="text-sm text-cyan-300 font-mono font-bold">
+              {(diagnostic.fault_confidence * 100).toFixed(1)}%
+            </span>
+          </div>
+
+          {/* Severity */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block">
+              SEVERITY
+            </span>
+
+            <span
+              className={`text-sm font-mono font-bold ${severityColor}`}
+            >
+              {diagnostic.severity}
+            </span>
+          </div>
+
+          {/* Sensor Drift */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block">
+              SENSOR DRIFT
+            </span>
+
+            <span
+              className={`text-sm font-mono font-bold ${
+                diagnostic.possible_sensor_drift
+                  ? 'text-amber-400'
+                  : 'text-emerald-400'
+              }`}
+            >
+              {diagnostic.possible_sensor_drift
+                ? 'DETECTED'
+                : 'NO'}
+            </span>
+          </div>
+
+        </div>
+
+        <div className="mt-3 pt-3 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-3">
+
+          {/* Explanation */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block mb-1">
+              DIAGNOSTIC EXPLANATION
+            </span>
+
+            <p className="text-xs text-slate-300 font-mono leading-relaxed">
+              {diagnostic.explanation}
+            </p>
+          </div>
+
+          {/* Maintenance Advisory */}
+          <div>
+            <span className="text-[9px] text-slate-500 font-mono block mb-1">
+              MAINTENANCE ADVISORY
+            </span>
+
+            <p className="text-xs text-slate-300 font-mono leading-relaxed">
+              {diagnostic.maintenance_advisory}
+            </p>
+          </div>
+
+        </div>
+      </div>
+
     </div>
   );
 };

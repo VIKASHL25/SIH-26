@@ -11,6 +11,7 @@ from backend.feature_engine import DigitalTwinFeatureEngine
 from backend.can_adapter import CANTelemetryAdapter
 from backend.can_receiver import CANInputReceiver
 from explainability.xai_engine import DigitalTwinXAIEngine
+from backend.diagnostics import build_diagnostic
 
 logger = logging.getLogger("MissionSimulationEngine")
 
@@ -208,6 +209,73 @@ class MissionSimulationEngine:
         self.fault_overrides = overrides
         logger.info(f"Active fault overrides updated: {self.fault_overrides}")
 
+    def set_fault_scenario(self, fault_id: str):
+        """
+        Apply a named synthetic fault scenario using the existing
+        fault-injection mechanism.
+
+        These are engineering test scenarios, not additional ML models.
+        """
+        scenarios = {
+            "F01": {
+                "rpm": -250.0,
+                "egt_C": -20.0,
+                "cht_C": -5.0,
+                "fuel_flow_kg_s": -0.0008,
+            },
+            "F02": {
+                "fuel_flow_kg_s": -0.0010,
+                "egt_C": +15.0,
+                "injection_timing_deg": -3.0,
+            },
+            "F03": {
+                "oil_pressure_bar": -2.0,
+                "oil_temperature_C": +15.0,
+            },
+            "F04": {
+                "cht_C": +20.0,
+                "egt_C": +15.0,
+                "oil_temperature_C": +8.0,
+            },
+            "F05": {
+                # Deliberately isolate CHT from the other engine signals.
+                # Used to test sensor-vs-engine reasoning.
+                "cht_C": +30.0,
+            },
+            "F06": {
+                "rpm": -150.0,
+                "egt_C": +15.0,
+                "cht_C": +8.0,
+                "injection_timing_deg": +4.0,
+            },
+            "F07": {
+                "vibration_rms": +0.8,
+            },
+            "F08": {
+                "cht_C": +30.0,
+                "egt_C": +25.0,
+                "oil_temperature_C": +15.0,
+            },
+        }
+
+        if fault_id not in scenarios:
+            raise ValueError(
+                f"Unknown fault scenario '{fault_id}'. "
+                f"Expected one of: {', '.join(scenarios)}"
+            )
+
+        self.set_fault_injection(scenarios[fault_id])
+
+        logger.info(
+            f"Fault scenario {fault_id} activated: "
+            f"{self.fault_overrides}"
+        )
+
+    def clear_fault_scenario(self):
+        """Clear the active named fault scenario."""
+        self.clear_fault_injection()
+    
+
     def clear_fault_injection(self):
         """Clears all fault overrides."""
         self.fault_overrides.clear()
@@ -330,6 +398,13 @@ class MissionSimulationEngine:
                 "records_available": buffer_len,
                 "records_required": 13
             }
+        # Build unified engineering diagnosis using existing ML outputs.
+        diagnostic = build_diagnostic(
+            sample=fv["clean_sample"],
+            anomaly_result=predictions["anomaly_detection"],
+            fault_result=predictions["fault_classification"],
+            degradation_result=predictions["degradation_estimation"],
+        )
 
         # Generate Maintenance Advisory with State Tracking (anti-spam)
         advisories = self._generate_maintenance_advisories(predictions, fv["clean_sample"])
@@ -346,7 +421,8 @@ class MissionSimulationEngine:
             "mission_type": raw_row.get("mission_type", "ISR_Mission"),
             "playback_state": self.state,
             "playback_speed": self.speed,
-            
+            "diagnostic": diagnostic,
+
             # Telemetry Sensors
             "telemetry": {
                 "rpm": round(float(fv["clean_sample"]["rpm"]), 1),

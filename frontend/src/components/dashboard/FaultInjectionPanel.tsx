@@ -28,28 +28,28 @@ export const FaultInjectionPanel: React.FC = () => {
     { key: 'battery_voltage_V', label: 'Battery Voltage (V)', defaultVal: -4.5 },
   ];
 
-  const presets: PresetScenario[] = [
-    {
-      name: 'Thermal Overheating',
-      overrides: { cht_C: 42.0, egt_C: 55.0 },
-      desc: '+42°C CHT, +55°C EGT',
-    },
-    {
-      name: 'Lubrication Loss',
-      overrides: { oil_pressure_bar: -2.3, oil_temperature_C: 22.0 },
-      desc: '-2.3 bar Oil Press, +22°C Temp',
-    },
-    {
-      name: 'Vibration / Mechanical',
-      overrides: { vibration_rms: 0.28, rpm: -250.0 },
-      desc: '+0.28g Vib, -250 RPM',
-    },
-    {
-      name: 'Fuel Injector Lean',
-      overrides: { fuel_flow_kg_s: -0.0018, egt_C: 45.0 },
-      desc: '-0.0018 kg/s Fuel, +45°C EGT',
-    },
-  ];
+const presets: PresetScenario[] = [
+  {
+    name: 'F08 • Overheating',
+    overrides: { cht_C: 42.0, egt_C: 55.0 },
+    desc: 'F08 • Thermal degradation',
+  },
+  {
+    name: 'F03 • Lubrication',
+    overrides: { oil_pressure_bar: -2.3, oil_temperature_C: 22.0 },
+    desc: 'F03 • Oil pressure loss',
+  },
+  {
+    name: 'F07 • Vibration',
+    overrides: { vibration_rms: 0.28, rpm: -250.0 },
+    desc: 'F07 • Mechanical vibration',
+  },
+  {
+    name: 'F02 • Injector',
+    overrides: { fuel_flow_kg_s: -0.0018, egt_C: 45.0 },
+    desc: 'F02 • Injector degradation',
+  },
+];
 
   const handleApplyCustom = async () => {
     setIsSubmitting(true);
