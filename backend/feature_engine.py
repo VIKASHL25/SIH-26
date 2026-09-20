@@ -10,7 +10,7 @@ class DigitalTwinFeatureEngine:
     
     Maintains a rolling historical buffer of raw sensor telemetry to compute:
     1. Physics residuals & thermodynamic ratio parameters.
-    2. Model 1 (Anomaly Detection) 13-feature vector.
+    2. Model 1 (Anomaly Detection) 51-feature vector.
     3. Model 2 (Degradation Detection) 120-feature vector.
     4. Model 3 (Fault Classification) 55-feature vector.
     5. Model 4 (RUL Estimation) 60-feature vector.
@@ -106,8 +106,8 @@ class DigitalTwinFeatureEngine:
         # Convert buffer to DataFrame for rolling calculations
         history_df = pd.DataFrame(list(self.buffer))
 
-        # 1. Model 1 (Anomaly Detection Features - 13 columns)
-        anomaly_df = self._generate_anomaly_features(clean_sample, model_manager.anomaly_feature_cols)
+        # 1. Model 1 (Anomaly Detection Features - 51 columns)
+        anomaly_df = self._generate_anomaly_features(history_df, model_manager.anomaly_feature_cols)
 
         # 2. Model 2 (Degradation Features - 120 columns)
         degradation_df = self._generate_degradation_features(history_df, model_manager.degradation_feature_cols)
@@ -126,9 +126,38 @@ class DigitalTwinFeatureEngine:
             "rul": rul_df
         }
 
-    def _generate_anomaly_features(self, clean_sample: dict, feature_cols: list) -> pd.DataFrame:
-        row = {col: clean_sample.get(col, 0.0) for col in feature_cols}
-        return pd.DataFrame([row], columns=feature_cols)
+    def _generate_anomaly_features(self, history_df: pd.DataFrame, feature_cols: list) -> pd.DataFrame:
+        """
+        Expanded anomaly feature set: current-timestep raw/residual/ratio
+        values (already present as columns in history_df's latest row)
+        PLUS rolling mean/std/slope over the same window used by the fault
+        classification model, for the same 9 core sensors.
+        """
+        df = history_df.copy()
+
+        rolling_targets = [
+            "cht_C", "egt_C", "oil_temperature_C", "oil_pressure_bar",
+            "fuel_flow_kg_s", "vibration_rms", "battery_voltage_V",
+            "injection_timing_deg", "physics_residual_C"
+        ]
+
+        w = min(15, len(df))
+        new_cols = {}
+        for sig in rolling_targets:
+            if sig in df.columns:
+                new_cols[f"{sig}_roll_mean"] = df[sig].rolling(window=w, min_periods=1).mean()
+                new_cols[f"{sig}_roll_std"] = df[sig].rolling(window=w, min_periods=1).std().fillna(0.0)
+                diff_val = df[sig].diff(w - 1).fillna(0.0) if w > 1 else 0.0
+                new_cols[f"{sig}_slope"] = diff_val / max(1.0, float(w))
+
+        df = pd.concat([df, pd.DataFrame(new_cols)], axis=1)
+
+        latest_row = df.iloc[-1]
+        feature_dict = {}
+        for col in feature_cols:
+            feature_dict[col] = float(latest_row[col]) if col in latest_row else 0.0
+
+        return pd.DataFrame([feature_dict], columns=feature_cols)
 
     def _generate_degradation_features(self, history_df: pd.DataFrame, feature_cols: list) -> pd.DataFrame:
         df = history_df.copy()

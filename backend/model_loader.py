@@ -34,6 +34,7 @@ class DigitalTwinModelManager:
         self.anomaly_model = None
         self.anomaly_scaler = None
         self.anomaly_feature_cols = [
+            # Current-timestep raw values (original 9)
             "cht_C",
             "egt_C",
             "oil_temperature_C",
@@ -43,10 +44,39 @@ class DigitalTwinModelManager:
             "alternator_current_A",
             "alternator_health",
             "injection_timing_deg",
+            # Current-timestep raw values (newly added — engine-state context
+            # that was missing even though its residual/ratio was present)
+            "rpm",
+            "fuel_flow_kg_s",
+            "power_W",
+            "torque_Nm",
+            "air_mass_flow_kg_s",
+            # Physics residuals (original 4)
             "cht_residual",
             "egt_residual",
             "rpm_residual",
             "physics_residual_C",
+            # Efficiency ratios (newly added — already computed in
+            # process_raw_sample, just not previously referenced here)
+            "fuel_air_ratio",
+            "power_per_fuel",
+            "torque_per_rpm",
+            "power_per_air",
+            "egt_rpm_ratio",
+            "fuel_egt_ratio",
+            # Rolling mean/std/slope over the same 15-sample window used by
+            # the fault classification model, for the same 9 core sensors
+            # (newly added — requires _generate_anomaly_features to read
+            # history_df instead of only the current sample)
+            "cht_C_roll_mean", "cht_C_roll_std", "cht_C_slope",
+            "egt_C_roll_mean", "egt_C_roll_std", "egt_C_slope",
+            "oil_temperature_C_roll_mean", "oil_temperature_C_roll_std", "oil_temperature_C_slope",
+            "oil_pressure_bar_roll_mean", "oil_pressure_bar_roll_std", "oil_pressure_bar_slope",
+            "fuel_flow_kg_s_roll_mean", "fuel_flow_kg_s_roll_std", "fuel_flow_kg_s_slope",
+            "vibration_rms_roll_mean", "vibration_rms_roll_std", "vibration_rms_slope",
+            "battery_voltage_V_roll_mean", "battery_voltage_V_roll_std", "battery_voltage_V_slope",
+            "injection_timing_deg_roll_mean", "injection_timing_deg_roll_std", "injection_timing_deg_slope",
+            "physics_residual_C_roll_mean", "physics_residual_C_roll_std", "physics_residual_C_slope",
         ]
 
         self.degradation_model = None
@@ -61,12 +91,19 @@ class DigitalTwinModelManager:
 
         # RUL Temporal EMA State Filter
         self.previous_rul: Optional[float] = None
+        # Anomaly Detection Debounce State: an alert only fires once the
+        # anomaly score has crossed threshold on 2 consecutive samples,
+        # which filters out single-sample sensor noise while adding at
+        # most 1 extra second of detection latency on real faults (real
+        # faults keep climbing; noise rarely repeats two ticks running).
+        self.previous_anomaly_raw: Optional[bool] = None
         self._is_loaded = False
         self.model_hashes: Dict[str, str] = {}
 
     def reset_state(self):
         """Resets temporal filtering state across mission reloads."""
         self.previous_rul = None
+        self.previous_anomaly_raw = None
 
     def _verify_model_hash(self, model_key: str, file_path: str):
         """Computes SHA-256 hash of model file, logs it, and verifies against models/model_hashes.json."""
@@ -157,18 +194,40 @@ class DigitalTwinModelManager:
         self._is_loaded = True
         logger.info("All 4 Digital Twin AI/ML models loaded and verified ready for simulation!")
 
-    def predict_anomaly(self, df_13_features: pd.DataFrame, threshold: float = 0.0) -> dict:
+    def predict_anomaly(self, df_51_features: pd.DataFrame, threshold: float = 19.5280) -> dict:
         """
-        Model 1: Anomaly Detection Inference.
+        Model 1: Anomaly Detection Inference (PCA reconstruction-error based,
+        with 2-consecutive-sample debouncing).
+
+        self.anomaly_model is now a fitted sklearn PCA (not Isolation Forest).
+        anomaly_score = squared reconstruction error in the scaled feature
+        space: PCA is fit on 'normal' operating data only, so a sample that
+        doesn't fit the learned normal-operation subspace reconstructs
+        poorly and gets a high score. `threshold` defaults to the value
+        calibrated in config.ANOMALY_THRESHOLD (95th percentile of normal
+        training reconstruction error, chosen for faster detection) and
+        should be passed from there by the caller, same as before.
+
+        Debouncing: the raw per-sample threshold crossing is tracked in
+        `raw_anomaly`. The reported `is_anomaly` only fires once the raw
+        flag has been True for 2 consecutive calls, filtering out
+        single-tick sensor noise at the cost of at most 1 extra second of
+        latency on genuine, sustained faults. Call `reset_state()` between
+        missions so debounce state doesn't leak across mission boundaries.
         """
-        scaled = self.anomaly_scaler.transform(df_13_features[self.anomaly_feature_cols])
-        decision_val = float(self.anomaly_model.decision_function(scaled)[0])
-        anomaly_score = -decision_val
-        is_anomaly = bool(anomaly_score >= threshold)
+        scaled = self.anomaly_scaler.transform(df_51_features[self.anomaly_feature_cols])
+        reconstructed = self.anomaly_model.inverse_transform(self.anomaly_model.transform(scaled))
+        anomaly_score = float(np.sum((scaled - reconstructed) ** 2, axis=1)[0])
+        raw_anomaly = bool(anomaly_score >= threshold)
+
+        is_anomaly = bool(raw_anomaly and self.previous_anomaly_raw)
+        self.previous_anomaly_raw = raw_anomaly
+
         return {
             "anomaly_score": round(anomaly_score, 4),
             "is_anomaly": is_anomaly,
-            "decision_function": round(decision_val, 4)
+            "raw_anomaly": raw_anomaly,
+            "decision_function": round(-anomaly_score, 4)
         }
 
     def predict_degradation(

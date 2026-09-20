@@ -5,7 +5,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Model Paths
-ANOMALY_MODEL_PATH = BASE_DIR / "models" / "anomaly_detection" / "isolation_forest_model.pkl"
+ANOMALY_MODEL_PATH = BASE_DIR / "models" / "anomaly_detection" / "anomaly_pca_model.pkl"  # was isolation_forest_model.pkl; now PCA reconstruction-error scoring
 ANOMALY_SCALER_PATH = BASE_DIR / "models" / "anomaly_detection" / "scaler.pkl"
 
 DEGRADATION_MODEL_PATH = BASE_DIR / "models" / "degradation_detection" / "xgb_degradation_model.json"
@@ -28,7 +28,7 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
 
 # Anomaly Detection Settings
-ANOMALY_THRESHOLD = 0.0  # decision function output threshold convention (-decision_function >= threshold)
+ANOMALY_THRESHOLD = 19.5280  # PCA reconstruction-error threshold (95th percentile of normal training data, chosen over 99th for faster fault detection at the cost of some false-positive rate — see model manifest; combined with 2-consecutive-flag debouncing in model_loader.py to keep false alarms manageable). Was 0.0, calibrated for the old Isolation Forest decision_function scale, which no longer applies.
 
 # Default Fallback Values for Sensor Inputs
 DEFAULT_SENSOR_DEFAULTS = {
