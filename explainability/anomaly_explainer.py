@@ -4,9 +4,19 @@ from typing import Dict, Any, List, Optional
 from explainability.feature_mapper import FeatureMapper
 from explainability.confidence import calculate_anomaly_confidence
 
+def _compute_decision(anomaly_model, X_batch: np.ndarray) -> np.ndarray:
+    if hasattr(anomaly_model, "decision_function"):
+        return anomaly_model.decision_function(X_batch)
+    elif hasattr(anomaly_model, "transform") and hasattr(anomaly_model, "inverse_transform"):
+        reconstructed = anomaly_model.inverse_transform(anomaly_model.transform(X_batch))
+        scores = np.sum((X_batch - reconstructed) ** 2, axis=1)
+        return -scores
+    else:
+        raise AttributeError(f"Anomaly model {type(anomaly_model).__name__} does not support decision_function or transform/inverse_transform.")
+
 class AnomalyExplainer:
     """
-    Explainability Engine for Isolation Forest Anomaly Detection Model.
+    Explainability Engine for Isolation Forest / PCA Anomaly Detection Model.
     
     Instead of forcing TreeSHAP onto Isolation Forest, this explainer uses
     rigorous Multi-Factor Sensitivity & Standardized Deviation Analysis:
@@ -39,7 +49,11 @@ class AnomalyExplainer:
 
         # Scaled feature vector
         scaled_vec = anomaly_scaler.transform(input_data)[0]
-        base_decision = float(prediction_result.get("decision_function", anomaly_model.decision_function([scaled_vec])[0]))
+        if "decision_function" in prediction_result:
+            base_decision = float(prediction_result["decision_function"])
+        else:
+            base_decision = float(_compute_decision(anomaly_model, np.array([scaled_vec]))[0])
+
         anomaly_score = float(prediction_result.get("anomaly_score", -base_decision))
         is_anomaly = bool(prediction_result.get("is_anomaly", anomaly_score >= 0.0))
 
@@ -53,7 +67,7 @@ class AnomalyExplainer:
         for i in range(n_features):
             perturbed_batch[i, i] = 0.0  # Set to scaled nominal mean (0.0 in StandardScaler space)
 
-        perturbed_decisions = anomaly_model.decision_function(perturbed_batch)
+        perturbed_decisions = _compute_decision(anomaly_model, perturbed_batch)
 
         for i, col in enumerate(feature_cols):
             x_val = float(raw_vals[i])
