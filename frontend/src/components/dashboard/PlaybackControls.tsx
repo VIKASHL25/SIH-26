@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, StepForward, FastForward, AlertCircle } from 'lucide-react';
+import { Play, Square, StepForward, FastForward, AlertCircle } from 'lucide-react';
 import { api } from '../../api/client';
 import { useDigitalTwinStore } from '../../store/useDigitalTwinStore';
 
@@ -160,8 +160,8 @@ export const PlaybackControls: React.FC = () => {
               disabled={isLoading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold tracking-wider transition-all"
             >
-              <Pause className="w-3.5 h-3.5 fill-amber-400" />
-              PAUSE
+              <Square className="w-3.5 h-3.5 fill-amber-400" />
+              STOP
             </button>
           ) : (
             <button
