@@ -21,28 +21,51 @@ import {
   Wind,
   Navigation,
   Filter,
-  Radio,
-  X,
 } from 'lucide-react';
 
 export type ViewMode = 'REALISTIC' | 'EXPLODED' | 'THERMAL' | 'XRAY' | 'WIREFRAME';
 export type HotspotFilterMode = 'ALL' | 'CRITICAL' | 'ALERTS_ONLY';
 
-export interface HotspotProjection {
+interface HotspotConfig {
   id: string;
   name: string;
-  val: string;
-  originX: number;
-  originY: number;
-  badgeX: number;
-  badgeY: number;
-  alert: boolean;
-  isHovered: boolean;
+  sensorKey: string;
+}
+
+const HOTSPOT_COMPONENTS: HotspotConfig[] = [
+  { id: 'propeller', name: '3-Blade Pusher Propeller', sensorKey: 'rpm' },
+  { id: 'cylinder_1', name: 'Cylinder #1 (Right Front)', sensorKey: 'cht1' },
+  { id: 'cylinder_2', name: 'Cylinder #2 (Right Rear)', sensorKey: 'cht2' },
+  { id: 'cylinder_3', name: 'Cylinder #3 (Left Front)', sensorKey: 'cht3' },
+  { id: 'cylinder_4', name: 'Cylinder #4 (Left Rear)', sensorKey: 'cht4' },
+  { id: 'turbocharger', name: 'Rotax Turbocharger', sensorKey: 'map' },
+  { id: 'crankcase', name: 'Oil System & Crankcase', sensorKey: 'oil_pressure' },
+  { id: 'exhaust_manifold', name: 'Exhaust Header & Collector', sensorKey: 'egt1' },
+];
+
+// Procedural Atmospheric Sky Environment Map (18,500 FT Stratosphere to Horizon Rayleigh Glow)
+function createAtmosphericSkyTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  const grad = ctx.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0.0, '#0a1a2f'); // Stratosphere Zenith
+  grad.addColorStop(0.3, '#152d4d'); // Upper flight corridor
+  grad.addColorStop(0.6, '#284b6f'); // Mid flight level (18,500 ft)
+  grad.addColorStop(0.85, '#4f7599'); // Atmospheric horizon Rayleigh glow
+  grad.addColorStop(1.0, '#1c2e42'); // Earth/Cloud under-deck
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 512);
+
+  return new THREE.CanvasTexture(canvas);
 }
 
 export const AeroPistonEngine3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const { currentFrame } = useDigitalTwinStore();
 
   // Controls & Display State
@@ -55,15 +78,19 @@ export const AeroPistonEngine3D: React.FC = () => {
   const [hotspotFilter, setHotspotFilter] = useState<HotspotFilterMode>('ALL');
   const [hoveredHotspotId, setHoveredHotspotId] = useState<string | null>(null);
 
-  // Scroll & Picture-in-Picture (PiP) State
-  const [isScrolledPast, setIsScrolledPast] = useState<boolean>(false);
-  const [isPipDismissed, setIsPipDismissed] = useState<boolean>(false);
+  // Sync state into mutable refs for the 60 FPS animation loop (prevents React re-renders)
+  const autoRotateRef = useRef<boolean>(autoRotate);
+  autoRotateRef.current = autoRotate;
+  const showHotspotsRef = useRef<boolean>(showHotspots);
+  showHotspotsRef.current = showHotspots;
+  const hotspotFilterRef = useRef<HotspotFilterMode>(hotspotFilter);
+  hotspotFilterRef.current = hotspotFilter;
+  const hoveredHotspotIdRef = useRef<string | null>(hoveredHotspotId);
+  hoveredHotspotIdRef.current = hoveredHotspotId;
+  const selectedComponentRef = useRef<EngineComponentRef | null>(selectedComponent);
+  selectedComponentRef.current = selectedComponent;
 
-  const isMinimized = isScrolledPast && !isFullscreen && !isPipDismissed;
-  const isMinimizedRef = useRef<boolean>(false);
-  isMinimizedRef.current = isMinimized;
-
-  // Engine Telemetry Extraction from currentFrame
+  // Telemetry extraction
   const telemetry = currentFrame?.telemetry;
   const rpm = telemetry?.rpm ?? 2450;
   const cht1 = telemetry?.cht1 ?? telemetry?.cht_C ?? 135;
@@ -71,8 +98,6 @@ export const AeroPistonEngine3D: React.FC = () => {
   const cht3 = telemetry?.cht3 ?? telemetry?.cht_C ?? 142;
   const cht4 = telemetry?.cht4 ?? telemetry?.cht_C ?? 136;
   const egt1 = telemetry?.egt1 ?? telemetry?.egt_C ?? 740;
-  const oilPressure = telemetry?.oil_pressure_bar ?? 4.2;
-  const map = telemetry?.map ?? 28.5;
   const altitude = telemetry?.altitude_m ?? 5638;
 
   // System Health & Anomaly State Extraction
@@ -104,54 +129,18 @@ export const AeroPistonEngine3D: React.FC = () => {
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const crankAngleRef = useRef<number>(0);
-  const cloudsGroupRef = useRef<THREE.Group | null>(null);
 
-  // Hotspot Screen Projections State with Avionics Leader Lines
-  const [hotspotPositions, setHotspotPositions] = useState<HotspotProjection[]>([]);
-
-  // IntersectionObserver to detect when the hero 3D container scrolls out of view
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        const scrolledPast = !entry.isIntersecting;
-        setIsScrolledPast(scrolledPast);
-        // Reset dismissed state when scrolling back to the top
-        if (!scrolledPast) {
-          setIsPipDismissed(false);
-        }
-      },
-      {
-        root: null,
-        threshold: 0.15,
-        rootMargin: '-60px 0px 0px 0px', // account for header offset
-      }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, []);
-
-  // Smooth scroll back to hero view
-  const scrollToHero = () => {
-    if (sentinelRef.current) {
-      sentinelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
-  // 1. Initialize Three.js Sky Atmosphere Environment, Photorealistic Lighting & Orbit Controls
+  // 1. Initialize High-Performance Three.js Environment ONCE on Mount
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 600;
 
-    // Scene
+    // Scene with dark aerospace environment
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x7389a2);
-    scene.fog = new THREE.FogExp2(0x7389a2, 0.012);
+    scene.background = new THREE.Color(0x0a101f);
+    scene.fog = new THREE.FogExp2(0x0a101f, 0.015);
     sceneRef.current = scene;
 
     // Camera
@@ -159,74 +148,51 @@ export const AeroPistonEngine3D: React.FC = () => {
     camera.position.set(8.8, 6.4, 9.8);
     cameraRef.current = camera;
 
-    // WebGL Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+    // High-performance WebGL Renderer
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+      precision: 'mediump',
+    });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.35;
+    renderer.toneMappingExposure = 1.25;
     rendererRef.current = renderer;
 
-    // Clear canvas
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    // Orbit Controls
+    // Orbit Controls with smooth damping
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+    controls.dampingFactor = 0.08;
     controls.maxDistance = 40;
     controls.minDistance = 2.0;
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
-    // Direct High-Altitude Sunlight
-    const sunLight = new THREE.DirectionalLight(0xfffbeb, 3.0);
+    // Direct High-Altitude Key Sun Light
+    const sunLight = new THREE.DirectionalLight(0xfffbeb, 3.2);
     sunLight.position.set(15, 25, 12);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.mapSize.width = 1024;
+    sunLight.shadow.mapSize.height = 1024;
     scene.add(sunLight);
 
-    // Ambient Sky Environment Fill Light
-    const skyLight = new THREE.AmbientLight(0xdbeafe, 1.2);
+    // Ambient Aerospace Fill Light
+    const skyLight = new THREE.AmbientLight(0xdbeafe, 1.3);
     scene.add(skyLight);
 
-    // Bounce Light
-    const groundBounce = new THREE.DirectionalLight(0x94a3b8, 1.0);
+    // Subtle Undercarriage Fill Light
+    const groundBounce = new THREE.DirectionalLight(0x475569, 0.8);
     groundBounce.position.set(-10, -10, -5);
     scene.add(groundBounce);
 
-    // Volumetric High-Altitude Clouds Layer
-    const cloudsGroup = new THREE.Group();
-    cloudsGroup.position.y = -7.0;
-    cloudsGroupRef.current = cloudsGroup;
-
-    const cloudMat = new THREE.MeshStandardMaterial({
-      color: 0xf1f5f9,
-      transparent: true,
-      opacity: 0.65,
-      roughness: 0.9,
-    });
-
-    for (let c = 0; c < 24; c++) {
-      const cloudPuff = new THREE.Mesh(
-        new THREE.SphereGeometry(3.5 + Math.random() * 2.5, 16, 16),
-        cloudMat
-      );
-      cloudPuff.scale.set(2.5, 0.4, 1.8);
-      cloudPuff.position.set(
-        (Math.random() - 0.5) * 60,
-        (Math.random() - 0.5) * 1.5,
-        (Math.random() - 0.5) * 60
-      );
-      cloudsGroup.add(cloudPuff);
-    }
-    scene.add(cloudsGroup);
-
-    // Build Hyper-Realistic 3D MALE UAV Aircraft Model
+    // Build 3D MALE UAV Aircraft Model
     const engineModel = createAeroPistonEngineModel();
     modelRef.current = engineModel;
     scene.add(engineModel.engineRootGroup);
@@ -259,20 +225,7 @@ export const AeroPistonEngine3D: React.FC = () => {
 
     renderer.domElement.addEventListener('pointerdown', handleCanvasClick);
 
-    // Dynamic ResizeObserver for seamless resizing when minimizing / expanding
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const w = entry.contentRect.width;
-        const h = entry.contentRect.height;
-        if (w > 0 && h > 0 && cameraRef.current && rendererRef.current) {
-          cameraRef.current.aspect = w / h;
-          cameraRef.current.updateProjectionMatrix();
-          rendererRef.current.setSize(w, h);
-        }
-      }
-    });
-    resizeObserver.observe(container);
-
+    // Resize handling
     const handleResize = () => {
       if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
       const w = containerRef.current.clientWidth;
@@ -284,108 +237,146 @@ export const AeroPistonEngine3D: React.FC = () => {
       }
     };
 
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(container);
     window.addEventListener('resize', handleResize);
 
-    // Animation Loop
+    // 60 FPS Optimized Animation Loop
     let clock = new THREE.Clock();
+    const cameraDir = new THREE.Vector3();
+    const compWorldOrigin = new THREE.Vector3();
+    const compWorldOffset = new THREE.Vector3();
+    const toOrigin = new THREE.Vector3();
+    const toOffset = new THREE.Vector3();
 
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
       const delta = clock.getDelta();
       const elapsedTime = clock.getElapsedTime();
 
-      if (controlsRef.current) {
-        controlsRef.current.autoRotate = autoRotate && !selectedComponent;
-        controlsRef.current.autoRotateSpeed = 0.8;
-        controlsRef.current.update();
-      }
+      // Orbit controls
+      controls.autoRotate = autoRotateRef.current && !selectedComponentRef.current;
+      controls.autoRotateSpeed = 0.8;
+      controls.update();
 
-      // Drift Clouds
-      if (cloudsGroupRef.current) {
-        cloudsGroupRef.current.position.z += delta * 1.5;
-        if (cloudsGroupRef.current.position.z > 20) {
-          cloudsGroupRef.current.position.z = -20;
-        }
-      }
+      // Gentle aerodynamic pitch oscillation
+      engineModel.engineRootGroup.rotation.z = Math.sin(elapsedTime * 0.5) * 0.015;
+      engineModel.engineRootGroup.position.y = Math.sin(elapsedTime * 0.8) * 0.06;
 
-      // Aerodynamic pitch oscillation
-      if (modelRef.current) {
-        engineModel.engineRootGroup.rotation.z = Math.sin(elapsedTime * 0.5) * 0.015;
-        engineModel.engineRootGroup.position.y = Math.sin(elapsedTime * 0.8) * 0.08;
-      }
-
-      // --- Telemetry Kinematics ---
+      // Telemetry Kinematics
       const activeFrame = useDigitalTwinStore.getState().currentFrame;
-      const activeRpm = activeFrame?.telemetry?.rpm ?? rpm;
+      const activeRpm = activeFrame?.telemetry?.rpm ?? 2450;
       const rps = activeRpm / 60;
       crankAngleRef.current += rps * delta * Math.PI * 2;
       const theta = crankAngleRef.current;
 
-      if (modelRef.current) {
-        const { kinematics } = modelRef.current;
+      const { kinematics } = engineModel;
 
-        // Rotate Crankshaft & Rear Pusher Propeller
-        kinematics.crankGroup.rotation.z = theta;
-        kinematics.propellerGroup.rotation.z = -theta;
+      // Rotate Crankshaft & Pusher Propeller
+      kinematics.crankGroup.rotation.z = theta;
+      kinematics.propellerGroup.rotation.z = -theta;
 
-        // EO/IR Chin Turret Scanning Movement
-        if (kinematics.sensorTurret) {
-          kinematics.sensorTurret.rotation.y = Math.sin(elapsedTime * 0.6) * 0.35;
-        }
-
-        // Piston Kinematics
-        const R = 0.35;
-        const L = 1.1;
-
-        kinematics.pistons.forEach((piston) => {
-          const angle = theta + piston.phaseAngle;
-          const pistonX = piston.sideSign * (R * Math.cos(angle) + Math.sqrt(L * L - R * R * Math.sin(angle) * Math.sin(angle)));
-          piston.group.position.x = pistonX;
-
-          const rodAngle = Math.asin((R / L) * Math.sin(angle));
-          piston.rodGroup.rotation.z = -piston.sideSign * rodAngle;
-
-          const isNearTDC = Math.abs(Math.sin(angle / 2)) < 0.12;
-          if (piston.cylinderIndex < kinematics.sparkLights.length) {
-            kinematics.sparkLights[piston.cylinderIndex].intensity = isNearTDC ? 4.0 : 0.0;
-          }
-        });
+      // EO/IR Sensor Turret
+      if (kinematics.sensorTurret) {
+        kinematics.sensorTurret.rotation.y = Math.sin(elapsedTime * 0.6) * 0.35;
       }
 
-      // Screen-Space Hotspot Projections with Avionics Leader Lines (ONLY when enlarged, NOT minimized)
-      if (showHotspots && !isMinimizedRef.current && cameraRef.current && modelRef.current && containerRef.current) {
-        const projectedHotspots: HotspotProjection[] = [];
+      // Piston Kinematics
+      const R = 0.35;
+      const L = 1.1;
+      kinematics.pistons.forEach((piston) => {
+        const angle = theta + piston.phaseAngle;
+        const pistonX = piston.sideSign * (R * Math.cos(angle) + Math.sqrt(L * L - R * R * Math.sin(angle) * Math.sin(angle)));
+        piston.group.position.x = pistonX;
+
+        const rodAngle = Math.asin((R / L) * Math.sin(angle));
+        piston.rodGroup.rotation.z = -piston.sideSign * rodAngle;
+
+        const isNearTDC = Math.abs(Math.sin(angle / 2)) < 0.12;
+        if (piston.cylinderIndex < kinematics.sparkLights.length) {
+          kinematics.sparkLights[piston.cylinderIndex].intensity = isNearTDC ? 3.0 : 0.0;
+        }
+      });
+
+      // Direct DOM & SVG Hotspot Overlay Projection (Runs smoothly at 60 FPS without React re-rendering!)
+      if (showHotspotsRef.current && containerRef.current && overlayRef.current && svgRef.current) {
         const w = containerRef.current.clientWidth;
         const h = containerRef.current.clientHeight;
-        const camera = cameraRef.current;
-
-        const cameraDir = new THREE.Vector3();
         camera.getWorldDirection(cameraDir);
 
-        modelRef.current.components.forEach((comp) => {
-          if (!comp.sensorKey) return;
+        const currentTelemetry = activeFrame?.telemetry;
+        const activeCht1 = currentTelemetry?.cht1 ?? currentTelemetry?.cht_C ?? 135;
+        const activeCht2 = currentTelemetry?.cht2 ?? currentTelemetry?.cht_C ?? 138;
+        const activeCht3 = currentTelemetry?.cht3 ?? currentTelemetry?.cht_C ?? 142;
+        const activeCht4 = currentTelemetry?.cht4 ?? currentTelemetry?.cht_C ?? 136;
+        const activeOil = currentTelemetry?.oil_pressure_bar ?? 4.2;
+        const activeMap = currentTelemetry?.map ?? 28.5;
+        const activeEgt = currentTelemetry?.egt1 ?? currentTelemetry?.egt_C ?? 740;
+
+        HOTSPOT_COMPONENTS.forEach((cfg) => {
+          const comp = engineModel.components.get(cfg.id);
+          const badgeEl = document.getElementById(`hotspot-badge-${cfg.id}`);
+          const valEl = document.getElementById(`hotspot-val-${cfg.id}`);
+          const lineEl = document.getElementById(`hotspot-line-${cfg.id}`);
+          const reticleEl = document.getElementById(`hotspot-reticle-${cfg.id}`);
+          const crossH = document.getElementById(`hotspot-crossh-${cfg.id}`);
+          const crossV = document.getElementById(`hotspot-crossv-${cfg.id}`);
+          const dotEl = document.getElementById(`hotspot-dot-${cfg.id}`);
+
+          if (!comp || !badgeEl || !lineEl || !reticleEl) return;
 
           // Component origin in 3D Scene World coordinates
-          const compWorldOrigin = new THREE.Vector3();
           comp.group.getWorldPosition(compWorldOrigin);
 
-          // Component callout offset transformed rigidly with the component in World coordinates
-          const compWorldOffset = comp.hotspotOffset.clone();
-          comp.group.localToWorld(compWorldOffset);
+          // Component callout offset relative to stationary aircraft/engine coordinate frame (never spins with rotating prop!)
+          compWorldOffset.copy(compWorldOrigin).add(comp.hotspotOffset);
 
-          // Vector from camera position to world points
-          const toOrigin = new THREE.Vector3().subVectors(compWorldOrigin, camera.position);
-          const toOffset = new THREE.Vector3().subVectors(compWorldOffset, camera.position);
+          toOrigin.subVectors(compWorldOrigin, camera.position);
+          toOffset.subVectors(compWorldOffset, camera.position);
 
-          // Check if points are in front of the camera plane
-          const dotOrigin = cameraDir.dot(toOrigin);
-          const dotOffset = cameraDir.dot(toOffset);
+          const dotOriginVal = cameraDir.dot(toOrigin);
+          const dotOffsetVal = cameraDir.dot(toOffset);
 
-          if (dotOrigin > 0.3 && dotOffset > 0.3) {
+          // Value and alert computation
+          let valStr = '';
+          let isAlert = false;
+          if (cfg.sensorKey === 'rpm') valStr = `${Math.round(activeRpm)} RPM`;
+          else if (cfg.sensorKey === 'cht1') {
+            valStr = `${Math.round(activeCht1)}°C`;
+            isAlert = activeCht1 > 175;
+          } else if (cfg.sensorKey === 'cht2') {
+            valStr = `${Math.round(activeCht2)}°C`;
+            isAlert = activeCht2 > 175;
+          } else if (cfg.sensorKey === 'cht3') {
+            valStr = `${Math.round(activeCht3)}°C`;
+            isAlert = activeCht3 > 175;
+          } else if (cfg.sensorKey === 'cht4') {
+            valStr = `${Math.round(activeCht4)}°C`;
+            isAlert = activeCht4 > 175;
+          } else if (cfg.sensorKey === 'oil_pressure') {
+            valStr = `${activeOil.toFixed(1)} bar`;
+            isAlert = activeOil < 2.0;
+          } else if (cfg.sensorKey === 'map') {
+            valStr = `${activeMap.toFixed(1)} inHg`;
+          } else if (cfg.sensorKey === 'egt1') {
+            valStr = `${Math.round(activeEgt)}°C`;
+            isAlert = activeEgt > 880;
+          }
+
+          if (valEl && valEl.textContent !== valStr) {
+            valEl.textContent = valStr;
+          }
+
+          // Filter check
+          let include = true;
+          if (hotspotFilterRef.current === 'ALERTS_ONLY' && !isAlert) include = false;
+          else if (hotspotFilterRef.current === 'CRITICAL' && !['rpm', 'cht1', 'oil_pressure', 'map'].includes(cfg.sensorKey)) include = false;
+
+          // Camera frustum check
+          if (include && dotOriginVal > 0.3 && dotOffsetVal > 0.3) {
             const originNdc = compWorldOrigin.clone().project(camera);
             const offsetNdc = compWorldOffset.clone().project(camera);
 
-            // Verify points are within or near viewport boundaries
             if (
               originNdc.z > -1.0 && originNdc.z < 1.0 &&
               offsetNdc.z > -1.0 && offsetNdc.z < 1.0 &&
@@ -398,61 +389,54 @@ export const AeroPistonEngine3D: React.FC = () => {
               const rawBadgeX = (offsetNdc.x * 0.5 + 0.5) * w;
               const rawBadgeY = (-(offsetNdc.y * 0.5) + 0.5) * h;
 
-              // Keep badge securely within screen padding
               const badgeX = Math.max(90, Math.min(w - 90, rawBadgeX));
               const badgeY = Math.max(45, Math.min(h - 50, rawBadgeY));
 
-              let valStr = '';
-              let isAlert = false;
+              const midX = (originX + badgeX) / 2;
+              const midY = badgeY;
 
-              if (comp.sensorKey === 'rpm') valStr = `${Math.round(activeRpm)} RPM`;
-              else if (comp.sensorKey === 'cht1') {
-                valStr = `${Math.round(cht1)}°C`;
-                isAlert = cht1 > 175;
-              } else if (comp.sensorKey === 'cht2') {
-                valStr = `${Math.round(cht2)}°C`;
-                isAlert = cht2 > 175;
-              } else if (comp.sensorKey === 'cht3') {
-                valStr = `${Math.round(cht3)}°C`;
-                isAlert = cht3 > 175;
-              } else if (comp.sensorKey === 'cht4') {
-                valStr = `${Math.round(cht4)}°C`;
-                isAlert = cht4 > 175;
-              } else if (comp.sensorKey === 'oil_pressure') {
-                valStr = `${oilPressure.toFixed(1)} bar`;
-                isAlert = oilPressure < 2.0;
-              } else if (comp.sensorKey === 'map') {
-                valStr = `${map.toFixed(1)} inHg`;
-              } else if (comp.sensorKey === 'egt1') {
-                valStr = `${Math.round(egt1)}°C`;
-                isAlert = egt1 > 880;
+              // Direct Transform & SVG updates with zero DOM re-creation
+              badgeEl.style.transform = `translate3d(${badgeX}px, ${badgeY}px, 0)`;
+              badgeEl.style.display = 'block';
+
+              lineEl.setAttribute('points', `${originX},${originY} ${midX},${midY} ${badgeX},${badgeY}`);
+              lineEl.setAttribute('display', 'inline');
+
+              reticleEl.setAttribute('cx', originX.toString());
+              reticleEl.setAttribute('cy', originY.toString());
+              reticleEl.setAttribute('display', 'inline');
+
+              if (crossH) {
+                crossH.setAttribute('x1', (originX - 6).toString());
+                crossH.setAttribute('y1', originY.toString());
+                crossH.setAttribute('x2', (originX + 6).toString());
+                crossH.setAttribute('y2', originY.toString());
+                crossH.setAttribute('display', 'inline');
               }
-
-              // Filtering logic to keep screen clean
-              let include = true;
-              if (hotspotFilter === 'ALERTS_ONLY' && !isAlert) include = false;
-              else if (hotspotFilter === 'CRITICAL' && !['rpm', 'cht1', 'oil_pressure', 'map'].includes(comp.sensorKey)) include = false;
-
-              if (include) {
-                projectedHotspots.push({
-                  id: comp.id,
-                  name: comp.name,
-                  val: valStr,
-                  originX,
-                  originY,
-                  badgeX,
-                  badgeY,
-                  alert: isAlert,
-                  isHovered: comp.id === hoveredHotspotId,
-                });
+              if (crossV) {
+                crossV.setAttribute('x1', originX.toString());
+                crossV.setAttribute('y1', (originY - 6).toString());
+                crossV.setAttribute('x2', originX.toString());
+                crossV.setAttribute('y2', (originY + 6).toString());
+                crossV.setAttribute('display', 'inline');
               }
+              if (dotEl) {
+                dotEl.setAttribute('cx', badgeX.toString());
+                dotEl.setAttribute('cy', badgeY.toString());
+                dotEl.setAttribute('display', 'inline');
+              }
+              return;
             }
           }
-        });
 
-        setHotspotPositions(projectedHotspots);
-      } else if (isMinimizedRef.current) {
-        setHotspotPositions([]);
+          // Hide elements when culled or filtered
+          badgeEl.style.display = 'none';
+          lineEl.setAttribute('display', 'none');
+          reticleEl.setAttribute('display', 'none');
+          if (crossH) crossH.setAttribute('display', 'none');
+          if (crossV) crossV.setAttribute('display', 'none');
+          if (dotEl) dotEl.setAttribute('display', 'none');
+        });
       }
 
       renderer.render(scene, camera);
@@ -467,7 +451,7 @@ export const AeroPistonEngine3D: React.FC = () => {
       renderer.domElement.removeEventListener('pointerdown', handleCanvasClick);
       renderer.dispose();
     };
-  }, [hotspotFilter, hoveredHotspotId]);
+  }, []);
 
   // 2. Handle Exploded View Factor
   useEffect(() => {
@@ -493,9 +477,7 @@ export const AeroPistonEngine3D: React.FC = () => {
           if (viewMode === 'WIREFRAME') {
             mesh.material = materials.wireframe;
           } else if (viewMode === 'XRAY') {
-            if (comp.id === 'male_uav_airframe') {
-              mesh.material = materials.glassXray;
-            } else if (comp.id.startsWith('cylinder')) {
+            if (comp.id === 'male_uav_airframe' || comp.id.startsWith('cylinder')) {
               mesh.material = materials.glassXray;
             } else {
               mesh.material = materials.castAluminum;
@@ -519,7 +501,7 @@ export const AeroPistonEngine3D: React.FC = () => {
               mesh.material = materials.uavPanelDarkSkin;
             }
           } else {
-            // REALISTIC Mode matching reference photo!
+            // REALISTIC Mode matching physical materials
             if (comp.id === 'male_uav_airframe') mesh.material = materials.uavMainPhysicalSkin;
             else if (comp.id === 'crankcase') mesh.material = materials.castAluminum;
             else if (comp.id.startsWith('cylinder')) {
@@ -571,483 +553,380 @@ export const AeroPistonEngine3D: React.FC = () => {
   };
 
   return (
-    <div ref={sentinelRef} className="w-full relative">
-      {/* Static In-Flow Placeholder displayed when 3D viewport is minimized to PiP (prevents layout jumping) */}
-      {isMinimized && (
-        <div
-          onClick={scrollToHero}
-          className="w-full h-[620px] rounded-xl border border-dashed border-cyan-500/30 bg-slate-950/40 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center cursor-pointer group hover:border-cyan-500/60 transition-all"
-        >
-          <div className="w-14 h-14 rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform shadow-lg shadow-cyan-950/50">
-            <Box className="w-7 h-7 text-cyan-400 animate-pulse" />
-          </div>
-          <h4 className="font-mono text-sm font-bold text-cyan-300 tracking-wider">
-            3D DIGITAL TWIN ACTIVE IN FLOATING VIEW (TOP RIGHT)
-          </h4>
-          <p className="font-mono text-xs text-slate-400 mt-1.5 max-w-md">
-            The aero piston engine is docked in the top-right corner. Scroll back up or click below to restore full-size interactive telemetry HUD.
-          </p>
-          <button
-            onClick={scrollToHero}
-            className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-xs font-mono font-bold transition-all shadow-lg shadow-cyan-950/50"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-            Restore Full 3D Hero View
-          </button>
-        </div>
-      )}
-
-      {/* Actual 3D Container (transitions seamlessly between Hero Mode, Fullscreen, and PiP Mode) */}
+    <div className="w-full relative">
       <div
         className={`transition-all duration-300 ease-out ${
           isFullscreen
             ? 'fixed inset-0 z-50 rounded-none border-none bg-slate-950 shadow-none'
-            : isMinimized
-            ? 'fixed top-20 right-6 z-50 w-80 h-52 sm:w-96 sm:h-60 rounded-xl border border-cyan-500/60 bg-slate-950/95 backdrop-blur-xl shadow-2xl shadow-cyan-950/90 ring-1 ring-cyan-500/30 overflow-hidden group hover:border-cyan-400'
             : 'relative w-full h-[620px] rounded-xl border border-slate-800 bg-slate-950/90 shadow-2xl overflow-hidden'
         }`}
       >
         {/* 3D WebGL Canvas Container */}
         <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-        {/* --- MINIMIZED (PiP) MODE OVERLAYS --- */}
-        {isMinimized && (
-          <>
-            {/* Top Compact Mini-HUD Bar with Live Nominal / Anomaly Status */}
-            <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between z-20 pointer-events-auto gap-2">
-              <div className="flex items-center gap-1.5 overflow-hidden">
-                {/* Nominal vs Anomaly Status Badge */}
-                {isAnomalyDetected ? (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-950/95 border border-rose-500 text-rose-200 font-mono font-bold text-[10px] animate-pulse shadow-lg shadow-rose-950/80">
-                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                    <span className="truncate">{faultDisplayName}</span>
-                    <span className="text-rose-500/70">|</span>
-                    <span className="text-rose-300 shrink-0">{healthPct}% HP</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 font-mono font-bold text-[10px] shadow-lg shadow-emerald-950/50">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
-                    <span>NOMINAL</span>
-                    <span className="text-emerald-500/70">|</span>
-                    <span className="text-emerald-200 shrink-0">{healthPct}% HP</span>
-                  </div>
-                )}
+        {/* SVG AVIONICS LEADER LINES OVERLAY (High-Performance Direct DOM updates) */}
+        {showHotspots && (
+          <svg ref={svgRef} className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
+            <defs>
+              <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.85" />
+                <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.45" />
+              </linearGradient>
+            </defs>
 
-                <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900/90 backdrop-blur-md border border-slate-700/80 text-[10px] font-mono text-cyan-300 shadow-md shrink-0">
-                  <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />
-                  <span className="font-bold">{Math.round(rpm)} RPM</span>
-                </div>
-              </div>
+            {HOTSPOT_COMPONENTS.map((cfg) => (
+              <g key={`svg-line-group-${cfg.id}`}>
+                {/* 3D Origin Target Circle */}
+                <circle
+                  id={`hotspot-reticle-${cfg.id}`}
+                  cx="0"
+                  cy="0"
+                  r="9"
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="1.5"
+                  strokeDasharray="3 3"
+                  style={{ display: 'none' }}
+                />
 
-              <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1 rounded-md border border-slate-700/80 shadow-md shrink-0">
-                <button
-                  onClick={scrollToHero}
-                  title="Expand Full 3D View"
-                  className="p-1 rounded hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 transition-colors"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setIsPipDismissed(true)}
-                  title="Dismiss Floating Window"
-                  className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+                {/* Reticle Crosshair Hairlines */}
+                <line
+                  id={`hotspot-crossh-${cfg.id}`}
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="0"
+                  stroke="#38bdf8"
+                  strokeWidth="1"
+                  opacity="0.8"
+                  style={{ display: 'none' }}
+                />
+                <line
+                  id={`hotspot-crossv-${cfg.id}`}
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="0"
+                  stroke="#38bdf8"
+                  strokeWidth="1"
+                  opacity="0.8"
+                  style={{ display: 'none' }}
+                />
 
-            {/* Bottom Subtle Interaction & Telemetry Bar */}
-            <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-[9px] font-mono text-slate-300 bg-slate-950/90 px-2.5 py-1 rounded-md border border-slate-800 backdrop-blur-md pointer-events-none">
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400">ALT:</span>
-                <span className="text-cyan-300 font-bold">{Math.round(altitude)}m</span>
-                <span className="text-slate-600">•</span>
-                <span className="text-slate-400">RPM:</span>
-                <span className="text-emerald-300 font-bold">{Math.round(rpm)}</span>
-              </div>
-              <button
-                onClick={scrollToHero}
-                className="text-cyan-400 font-bold tracking-wider pointer-events-auto hover:underline flex items-center gap-1"
-              >
-                <span>RESTORE FULL HUD</span>
-                <Maximize2 className="w-2.5 h-2.5" />
-              </button>
-            </div>
-          </>
+                {/* Leader Line Path */}
+                <polyline
+                  id={`hotspot-line-${cfg.id}`}
+                  points="0,0 0,0 0,0"
+                  fill="none"
+                  stroke="url(#lineGrad)"
+                  strokeWidth="1.5"
+                  strokeDasharray="4 2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: 'none' }}
+                />
+
+                {/* Terminal Anchor Dot */}
+                <circle
+                  id={`hotspot-dot-${cfg.id}`}
+                  cx="0"
+                  cy="0"
+                  r="2.5"
+                  fill="#06b6d4"
+                  style={{ display: 'none' }}
+                />
+              </g>
+            ))}
+          </svg>
         )}
 
-        {/* --- ENLARGED (HERO / FULLSCREEN) MODE OVERLAYS --- */}
-        {!isMinimized && (
-          <>
-            {/* SVG AVIONICS LEADER LINES OVERLAY (CONNECTS 3D ANCHORS TO HUD BADGES) */}
-            {showHotspots && (
-              <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
-                <defs>
-                  <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.85" />
-                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.45" />
-                  </linearGradient>
-                  <linearGradient id="lineAlertGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#ef4444" stopOpacity="0.95" />
-                    <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.55" />
-                  </linearGradient>
-                </defs>
-
-                {hotspotPositions.map((hs) => {
-                  const midX = (hs.originX + hs.badgeX) / 2;
-                  const midY = hs.badgeY;
-                  const isAlert = hs.alert;
-                  const isHover = hs.isHovered;
-
-                  return (
-                    <g key={`svg-line-${hs.id}`}>
-                      {/* Reticle Target Circle at 3D Component Origin */}
-                      <circle
-                        cx={hs.originX}
-                        cy={hs.originY}
-                        r={isHover ? 6 : 4}
-                        fill={isAlert ? '#ef4444' : '#38bdf8'}
-                        className="animate-pulse"
-                      />
-                      <circle
-                        cx={hs.originX}
-                        cy={hs.originY}
-                        r={isHover ? 13 : 9}
-                        fill="none"
-                        stroke={isAlert ? '#ef4444' : '#38bdf8'}
-                        strokeWidth="1.5"
-                        strokeDasharray="3 3"
-                      />
-
-                      {/* Reticle Crosshair Hairlines on the 3D Part */}
-                      <line
-                        x1={hs.originX - (isHover ? 8 : 6)}
-                        y1={hs.originY}
-                        x2={hs.originX + (isHover ? 8 : 6)}
-                        y2={hs.originY}
-                        stroke={isAlert ? '#ef4444' : '#38bdf8'}
-                        strokeWidth="1"
-                        opacity="0.8"
-                      />
-                      <line
-                        x1={hs.originX}
-                        y1={hs.originY - (isHover ? 8 : 6)}
-                        x2={hs.originX}
-                        y2={hs.originY + (isHover ? 8 : 6)}
-                        stroke={isAlert ? '#ef4444' : '#38bdf8'}
-                        strokeWidth="1"
-                        opacity="0.8"
-                      />
-
-                      {/* Leader Line Path from 3D Origin -> Elbow -> HUD Badge */}
-                      <polyline
-                        points={`${hs.originX},${hs.originY} ${midX},${midY} ${hs.badgeX},${hs.badgeY}`}
-                        fill="none"
-                        stroke={isAlert ? 'url(#lineAlertGrad)' : 'url(#lineGrad)'}
-                        strokeWidth={isHover ? '2.5' : '1.5'}
-                        strokeDasharray={isHover ? 'none' : '4 2'}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-
-                      {/* Terminal Anchor Dot at Badge Base */}
-                      <circle
-                        cx={hs.badgeX}
-                        cy={hs.badgeY}
-                        r="2.5"
-                        fill={isAlert ? '#ef4444' : '#06b6d4'}
-                      />
-                    </g>
-                  );
-                })}
-              </svg>
-            )}
-
-            {/* Top Header Avionics HUD */}
-            <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
-              <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
-                <div className="w-3 h-3 rounded-full bg-cyan-400 animate-ping" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Plane className="w-4 h-4 text-cyan-400" />
-                    <h3 className="font-mono text-xs font-bold text-cyan-400 tracking-wider uppercase">
-                      MALE UAV PROPULSION DIGITAL TWIN (N190TC)
-                    </h3>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30 font-bold">
-                      AIRBORNE 18,500 FT
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-4 text-[11px] text-slate-300 font-mono mt-1">
-                    <span className="flex items-center gap-1 text-slate-400">
-                      <Navigation className="w-3 h-3 text-cyan-400" /> ALT: {Math.round(altitude)} m (18,500 ft)
-                    </span>
-                    <span className="flex items-center gap-1 text-slate-400">
-                      <Wind className="w-3 h-3 text-emerald-400" /> SPEED: 145 KTS
-                    </span>
-                    <span className="text-cyan-400 font-bold">ENGINE: {Math.round(rpm)} RPM</span>
-                  </div>
+        {/* Floating 3D Hotspot Sensor Badges Overlay (Direct Transform Updates at 60 FPS) */}
+        {showHotspots && (
+          <div ref={overlayRef} className="absolute inset-0 pointer-events-none z-10">
+            {HOTSPOT_COMPONENTS.map((cfg) => (
+              <div
+                key={cfg.id}
+                id={`hotspot-badge-${cfg.id}`}
+                onMouseEnter={() => setHoveredHotspotId(cfg.id)}
+                onMouseLeave={() => setHoveredHotspotId(null)}
+                style={{ display: 'none', position: 'absolute', top: 0, left: 0 }}
+                className="pointer-events-auto transition-transform duration-75 -translate-x-1/2 -translate-y-1/2"
+              >
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg backdrop-blur-md border border-slate-700/80 bg-slate-950/90 text-slate-200 hover:border-cyan-400 shadow-2xl text-[11px] font-mono whitespace-nowrap cursor-pointer hover:scale-105 transition-all">
+                  <div className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
+                  <span className="text-slate-400 font-medium">{cfg.name.split(' (')[0]}:</span>
+                  <span id={`hotspot-val-${cfg.id}`} className="font-bold text-cyan-300">
+                    --
+                  </span>
                 </div>
               </div>
+            ))}
+          </div>
+        )}
 
-              {/* View Mode Toolbar */}
-              <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
-                <button
-                  onClick={() => setViewMode('REALISTIC')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                    viewMode === 'REALISTIC'
-                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Box className="w-3.5 h-3.5" />
-                  1:1 Real Drone
-                </button>
+        {/* Top Header Avionics HUD */}
+        <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none z-20">
+          <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
+            <div className="w-3 h-3 rounded-full bg-cyan-400 animate-ping" />
+            <div>
+              <div className="flex items-center gap-2">
+                <Plane className="w-4 h-4 text-cyan-400" />
+                <h3 className="font-mono text-xs font-bold text-cyan-400 tracking-wider uppercase">
+                  MALE UAV PROPULSION DIGITAL TWIN (N190TC)
+                </h3>
 
-                <button
-                  onClick={() => setViewMode('EXPLODED')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                    viewMode === 'EXPLODED'
-                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  Exploded
-                </button>
-
-                <button
-                  onClick={() => setViewMode('THERMAL')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                    viewMode === 'THERMAL'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20 font-bold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Flame className="w-3.5 h-3.5 text-amber-400" />
-                  Thermal Heat
-                </button>
-
-                <button
-                  onClick={() => setViewMode('XRAY')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                    viewMode === 'XRAY'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20 font-bold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                  Engine Cutaway
-                </button>
-
-                <button
-                  onClick={() => setViewMode('WIREFRAME')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                    viewMode === 'WIREFRAME'
-                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm shadow-blue-500/20 font-bold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Zap className="w-3.5 h-3.5 text-blue-400" />
-                  Hologram
-                </button>
-
-                <div className="w-px h-5 bg-slate-700 mx-1" />
-
-                <button
-                  onClick={() => setIsFullscreen(!isFullscreen)}
-                  className="p-1.5 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800"
-                  title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                >
-                  {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Floating Spatially Separated 3D Hotspot Sensor Badges with Exact Values */}
-            {showHotspots &&
-              hotspotPositions.map((hs) => (
-                <div
-                  key={hs.id}
-                  style={{ left: `${hs.badgeX}px`, top: `${hs.badgeY}px` }}
-                  onMouseEnter={() => setHoveredHotspotId(hs.id)}
-                  onMouseLeave={() => setHoveredHotspotId(null)}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto transition-transform duration-100 ${
-                    hs.isHovered ? 'z-30 scale-105' : hs.alert ? 'z-20 scale-100' : 'z-10'
-                  }`}
-                >
-                  <div
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg backdrop-blur-md border shadow-2xl text-[11px] font-mono whitespace-nowrap cursor-pointer transition-all ${
-                      hs.alert
-                        ? 'bg-rose-950/95 border-rose-500 text-rose-200 animate-pulse shadow-rose-900/60 ring-1 ring-rose-400/50'
-                        : hs.isHovered
-                        ? 'bg-cyan-950/95 border-cyan-400 text-cyan-100 shadow-cyan-500/40 ring-1 ring-cyan-400/50'
-                        : 'bg-slate-950/90 border-slate-700/80 text-slate-200 hover:border-cyan-500/60 shadow-black/80'
-                    }`}
-                  >
-                    <div className={`w-2 h-2 rounded-full shrink-0 ${hs.alert ? 'bg-rose-400 animate-ping' : 'bg-cyan-400'}`} />
-                    <span className="text-slate-400 font-medium">{hs.name.split(' (')[0]}:</span>
-                    <span className={`font-bold ${hs.alert ? 'text-rose-300' : 'text-cyan-300'}`}>{hs.val}</span>
-                  </div>
-                </div>
-              ))}
-
-            {/* Bottom Control Bar with Hotspot Filter Options */}
-            <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
-              {/* Camera Angles Presets */}
-              <div className="flex items-center gap-2 bg-slate-900/85 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
-                <span className="text-[11px] font-mono text-slate-400 px-2 flex items-center gap-1">
-                  <Sliders className="w-3 h-3 text-cyan-400" /> Flight View:
-                </span>
-                <button
-                  onClick={() => setCameraPreset('PHOTO_ANGLE')}
-                  className="px-2.5 py-1 text-[11px] font-mono rounded text-cyan-300 bg-cyan-500/20 hover:bg-slate-800 border border-cyan-500/40 font-bold"
-                >
-                  📷 Reference Flight View
-                </button>
-                <button
-                  onClick={() => setCameraPreset('REAR_PUSHER')}
-                  className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
-                >
-                  Rear Pusher Prop
-                </button>
-                <button
-                  onClick={() => setCameraPreset('ENGINE_BAY')}
-                  className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
-                >
-                  Internal Engine Bay
-                </button>
-                <button
-                  onClick={() => setCameraPreset('FULL_UAV')}
-                  className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
-                >
-                  High Altitude Flight
-                </button>
-              </div>
-
-              {/* Hotspot Filter & Display Controls */}
-              <div className="flex items-center gap-3 bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
-                {/* Exploded View Slider */}
-                {viewMode === 'EXPLODED' && (
-                  <div className="flex items-center gap-2 font-mono text-xs text-slate-300">
-                    <span className="text-cyan-400">Expansion:</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={explosionFactor}
-                      onChange={(e) => setExplosionFactor(parseFloat(e.target.value))}
-                      className="w-24 accent-cyan-400 cursor-pointer"
-                    />
-                    <span className="w-8 text-right font-mono text-[11px]">{Math.round(explosionFactor * 100)}%</span>
-                  </div>
+                {/* Real-Time Nominal vs Anomaly Status Badge */}
+                {isAnomalyDetected ? (
+                  <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-rose-950/90 text-rose-300 font-mono border border-rose-500/50 font-bold animate-pulse">
+                    <ShieldAlert className="w-3 h-3 text-rose-400" />
+                    {faultDisplayName} ({healthPct}% HP)
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30 font-bold">
+                    NOMINAL ({healthPct}% HP)
+                  </span>
                 )}
-
-                {/* Filter Dropdown */}
-                <div className="flex items-center gap-1.5 text-xs font-mono">
-                  <Filter className="w-3.5 h-3.5 text-cyan-400" />
-                  <span className="text-slate-400">Hotspots:</span>
-                  <button
-                    onClick={() => setHotspotFilter('ALL')}
-                    className={`px-2 py-1 text-[11px] rounded transition-all ${
-                      hotspotFilter === 'ALL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    All Metrics
-                  </button>
-                  <button
-                    onClick={() => setHotspotFilter('CRITICAL')}
-                    className={`px-2 py-1 text-[11px] rounded transition-all ${
-                      hotspotFilter === 'CRITICAL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    Critical 4
-                  </button>
-                  <button
-                    onClick={() => setHotspotFilter('ALERTS_ONLY')}
-                    className={`px-2 py-1 text-[11px] rounded transition-all ${
-                      hotspotFilter === 'ALERTS_ONLY' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    Alerts Only
-                  </button>
-                </div>
-
-                <div className="w-px h-5 bg-slate-700 mx-1" />
-
-                {/* Auto Rotation Toggle */}
-                <button
-                  onClick={() => setAutoRotate(!autoRotate)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
-                    autoRotate
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                      : 'text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  {autoRotate ? <Pause className="w-3.5 h-3.5 text-emerald-400" /> : <Play className="w-3.5 h-3.5" />}
-                  Auto Orbit
-                </button>
-
-                {/* Hotspots Toggle */}
-                <button
-                  onClick={() => setShowHotspots(!showHotspots)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
-                    showHotspots
-                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                      : 'text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                  {showHotspots ? 'HUD On' : 'HUD Off'}
-                </button>
+              </div>
+              <div className="flex items-center gap-4 text-[11px] text-slate-300 font-mono mt-1">
+                <span className="flex items-center gap-1 text-slate-400">
+                  <Navigation className="w-3 h-3 text-cyan-400" /> ALT: {Math.round(altitude)} m (18,500 ft)
+                </span>
+                <span className="flex items-center gap-1 text-slate-400">
+                  <Wind className="w-3 h-3 text-emerald-400" /> SPEED: 145 KTS
+                </span>
+                <span className="text-cyan-400 font-bold">ENGINE: {Math.round(rpm)} RPM</span>
               </div>
             </div>
+          </div>
 
-            {/* Selected Component Modal Overlay */}
-            {selectedComponent && (
-              <div className="absolute top-16 right-4 w-80 bg-slate-900/90 backdrop-blur-md border border-cyan-500/40 p-4 rounded-xl shadow-2xl z-30 font-mono text-xs text-slate-200">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-700">
-                  <div className="flex items-center gap-2">
-                    <Box className="w-4 h-4 text-cyan-400" />
-                    <span className="font-bold text-cyan-300">{selectedComponent.name}</span>
-                  </div>
-                  <button
-                    onClick={() => setSelectedComponent(null)}
-                    className="text-slate-400 hover:text-slate-100"
-                  >
-                    ✕
-                  </button>
-                </div>
+          {/* View Mode Toolbar */}
+          <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
+            <button
+              onClick={() => setViewMode('REALISTIC')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                viewMode === 'REALISTIC'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <Box className="w-3.5 h-3.5" />
+              1:1 Real Drone
+            </button>
 
-                <div className="mt-3 space-y-2 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Callsign:</span>
-                    <span className="text-slate-200">N190TC / DRDO PS-26054</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Airframe Composite:</span>
-                    <span className="text-cyan-300 font-bold">Clearcoat Military Epoxy</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Flight Status:</span>
-                    <span className="text-emerald-400 font-bold flex items-center gap-1">
-                      <ShieldAlert className="w-3 h-3 text-emerald-400" /> AIRBORNE NOMINAL
-                    </span>
-                  </div>
+            <button
+              onClick={() => setViewMode('EXPLODED')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                viewMode === 'EXPLODED'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              Exploded
+            </button>
 
-                  {selectedComponent.sensorKey && (
-                    <div className="mt-2 p-2 bg-slate-800/80 rounded border border-slate-700 text-cyan-300 flex items-center justify-between">
-                      <span>Telemetry Metric:</span>
-                      <span className="font-bold">
-                        {selectedComponent.sensorKey.toUpperCase()}
-                      </span>
-                    </div>
-                  )}
-                </div>
+            <button
+              onClick={() => setViewMode('THERMAL')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                viewMode === 'THERMAL'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <Flame className="w-3.5 h-3.5 text-amber-400" />
+              Thermal Heat
+            </button>
+
+            <button
+              onClick={() => setViewMode('XRAY')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                viewMode === 'XRAY'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <Eye className="w-3.5 h-3.5 text-emerald-400" />
+              Engine Cutaway
+            </button>
+
+            <button
+              onClick={() => setViewMode('WIREFRAME')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                viewMode === 'WIREFRAME'
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm shadow-blue-500/20 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-blue-400" />
+              Hologram
+            </button>
+
+            <div className="w-px h-5 bg-slate-700 mx-1" />
+
+            <button
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="p-1.5 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800"
+              title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom Control Bar with Hotspot Filter Options */}
+        <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none z-20">
+          {/* Camera Angles Presets */}
+          <div className="flex items-center gap-2 bg-slate-900/85 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
+            <span className="text-[11px] font-mono text-slate-400 px-2 flex items-center gap-1">
+              <Sliders className="w-3 h-3 text-cyan-400" /> Flight View:
+            </span>
+            <button
+              onClick={() => setCameraPreset('PHOTO_ANGLE')}
+              className="px-2.5 py-1 text-[11px] font-mono rounded text-cyan-300 bg-cyan-500/20 hover:bg-slate-800 border border-cyan-500/40 font-bold"
+            >
+              📷 Reference Flight View
+            </button>
+            <button
+              onClick={() => setCameraPreset('REAR_PUSHER')}
+              className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
+            >
+              Rear Pusher Prop
+            </button>
+            <button
+              onClick={() => setCameraPreset('ENGINE_BAY')}
+              className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
+            >
+              Internal Engine Bay
+            </button>
+            <button
+              onClick={() => setCameraPreset('FULL_UAV')}
+              className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
+            >
+              High Altitude Flight
+            </button>
+          </div>
+
+          {/* Hotspot Filter & Display Controls */}
+          <div className="flex items-center gap-3 bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
+            {/* Exploded View Slider */}
+            {viewMode === 'EXPLODED' && (
+              <div className="flex items-center gap-2 font-mono text-xs text-slate-300">
+                <span className="text-cyan-400">Expansion:</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={explosionFactor}
+                  onChange={(e) => setExplosionFactor(parseFloat(e.target.value))}
+                  className="w-24 accent-cyan-400 cursor-pointer"
+                />
+                <span className="w-8 text-right font-mono text-[11px]">{Math.round(explosionFactor * 100)}%</span>
               </div>
             )}
-          </>
+
+            {/* Filter Buttons */}
+            <div className="flex items-center gap-1.5 text-xs font-mono">
+              <Filter className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-slate-400">Hotspots:</span>
+              <button
+                onClick={() => setHotspotFilter('ALL')}
+                className={`px-2 py-1 text-[11px] rounded transition-all ${
+                  hotspotFilter === 'ALL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                }`}
+              >
+                All Metrics
+              </button>
+              <button
+                onClick={() => setHotspotFilter('CRITICAL')}
+                className={`px-2 py-1 text-[11px] rounded transition-all ${
+                  hotspotFilter === 'CRITICAL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                }`}
+              >
+                Critical 4
+              </button>
+              <button
+                onClick={() => setHotspotFilter('ALERTS_ONLY')}
+                className={`px-2 py-1 text-[11px] rounded transition-all ${
+                  hotspotFilter === 'ALERTS_ONLY' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                }`}
+              >
+                Alerts Only
+              </button>
+            </div>
+
+            <div className="w-px h-5 bg-slate-700 mx-1" />
+
+            {/* Auto Rotation Toggle */}
+            <button
+              onClick={() => setAutoRotate(!autoRotate)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
+                autoRotate
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              {autoRotate ? <Pause className="w-3.5 h-3.5 text-emerald-400" /> : <Play className="w-3.5 h-3.5" />}
+              Auto Orbit
+            </button>
+
+            {/* Hotspots Toggle */}
+            <button
+              onClick={() => setShowHotspots(!showHotspots)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
+                showHotspots
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5 text-cyan-400" />
+              {showHotspots ? 'HUD On' : 'HUD Off'}
+            </button>
+          </div>
+        </div>
+
+        {/* Selected Component Modal Overlay */}
+        {selectedComponent && (
+          <div className="absolute top-16 right-4 w-80 bg-slate-900/90 backdrop-blur-md border border-cyan-500/40 p-4 rounded-xl shadow-2xl z-30 font-mono text-xs text-slate-200">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-700">
+              <div className="flex items-center gap-2">
+                <Box className="w-4 h-4 text-cyan-400" />
+                <span className="font-bold text-cyan-300">{selectedComponent.name}</span>
+              </div>
+              <button
+                onClick={() => setSelectedComponent(null)}
+                className="text-slate-400 hover:text-slate-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-3 space-y-2 text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Callsign:</span>
+                <span className="text-slate-200">N190TC / DRDO PS-26054</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Airframe Composite:</span>
+                <span className="text-cyan-300 font-bold">Clearcoat Military Epoxy</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Flight Status:</span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <ShieldAlert className="w-3 h-3 text-emerald-400" /> AIRBORNE NOMINAL
+                </span>
+              </div>
+
+              {selectedComponent.sensorKey && (
+                <div className="mt-2 p-2 bg-slate-800/80 rounded border border-slate-700 text-cyan-300 flex items-center justify-between">
+                  <span>Telemetry Metric:</span>
+                  <span className="font-bold">
+                    {selectedComponent.sensorKey.toUpperCase()}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>
