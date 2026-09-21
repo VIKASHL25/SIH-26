@@ -49,18 +49,22 @@ class AnomalyExplainer:
 
         # Scaled feature vector
         scaled_vec = anomaly_scaler.transform(input_data)[0]
-        base_decision = float(prediction_result.get("decision_function", anomaly_model.decision_function([scaled_vec])[0]))
+        base_decision = float(prediction_result.get("decision_function", _compute_decision(anomaly_model, np.array([scaled_vec]))[0]))
         anomaly_score = float(prediction_result.get("anomaly_score", -base_decision))
         is_anomaly = bool(prediction_result.get("is_anomaly", anomaly_score >= 0.0))
 
-            # 1. Feature perturbation sensitivity analysis
-            # For each feature, evaluate how much decision_function improves when setting feature to scaled=0 (nominal mean)
-            n_features = len(feature_cols)
-            perturbed_batch = np.tile(scaled_vec, (n_features, 1))
-            for i in range(n_features):
-                perturbed_batch[i, i] = 0.0  # Set to scaled nominal mean (0.0 in StandardScaler space)
+        # 1. Feature perturbation sensitivity analysis
+        # For each feature, evaluate how much decision_function improves when setting feature to scaled=0 (nominal mean)
+        n_features = len(feature_cols)
+        perturbed_batch = np.tile(scaled_vec, (n_features, 1))
+        for i in range(n_features):
+            perturbed_batch[i, i] = 0.0  # Set to scaled nominal mean (0.0 in StandardScaler space)
 
-        perturbed_decisions = anomaly_model.decision_function(perturbed_batch)
+        perturbed_decisions = _compute_decision(anomaly_model, perturbed_batch)
+        recovery_deltas = perturbed_decisions - base_decision
+
+        is_pca = hasattr(anomaly_model, "inverse_transform") and hasattr(anomaly_model, "transform")
+        explanation_method = "PCA Reconstruction Residual & Z-Score Deviation Analysis" if is_pca else "Isolation Forest Counterfactual Sensitivity & Z-Score Deviation Analysis"
 
         contributions = []
         for i, col in enumerate(feature_cols):
