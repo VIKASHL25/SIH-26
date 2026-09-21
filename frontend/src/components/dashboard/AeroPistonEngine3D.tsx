@@ -21,6 +21,8 @@ import {
   Wind,
   Navigation,
   Filter,
+  Radio,
+  X,
 } from 'lucide-react';
 
 export type ViewMode = 'REALISTIC' | 'EXPLODED' | 'THERMAL' | 'XRAY' | 'WIREFRAME';
@@ -40,6 +42,7 @@ export interface HotspotProjection {
 
 export const AeroPistonEngine3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const { currentFrame } = useDigitalTwinStore();
 
   // Controls & Display State
@@ -51,6 +54,14 @@ export const AeroPistonEngine3D: React.FC = () => {
   const [showHotspots, setShowHotspots] = useState<boolean>(true);
   const [hotspotFilter, setHotspotFilter] = useState<HotspotFilterMode>('ALL');
   const [hoveredHotspotId, setHoveredHotspotId] = useState<string | null>(null);
+
+  // Scroll & Picture-in-Picture (PiP) State
+  const [isScrolledPast, setIsScrolledPast] = useState<boolean>(false);
+  const [isPipDismissed, setIsPipDismissed] = useState<boolean>(false);
+
+  const isMinimized = isScrolledPast && !isFullscreen && !isPipDismissed;
+  const isMinimizedRef = useRef<boolean>(false);
+  isMinimizedRef.current = isMinimized;
 
   // Engine Telemetry Extraction from currentFrame
   const telemetry = currentFrame?.telemetry;
@@ -68,6 +79,7 @@ export const AeroPistonEngine3D: React.FC = () => {
   const modelRef = useRef<BuiltEngineModel | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const crankAngleRef = useRef<number>(0);
@@ -76,12 +88,44 @@ export const AeroPistonEngine3D: React.FC = () => {
   // Hotspot Screen Projections State with Avionics Leader Lines
   const [hotspotPositions, setHotspotPositions] = useState<HotspotProjection[]>([]);
 
+  // IntersectionObserver to detect when the hero 3D container scrolls out of view
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const scrolledPast = !entry.isIntersecting;
+        setIsScrolledPast(scrolledPast);
+        // Reset dismissed state when scrolling back to the top
+        if (!scrolledPast) {
+          setIsPipDismissed(false);
+        }
+      },
+      {
+        root: null,
+        threshold: 0.15,
+        rootMargin: '-60px 0px 0px 0px', // account for header offset
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
+
+  // Smooth scroll back to hero view
+  const scrollToHero = () => {
+    if (sentinelRef.current) {
+      sentinelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   // 1. Initialize Three.js Sky Atmosphere Environment, Photorealistic Lighting & Orbit Controls
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 600;
 
     // Scene
     const scene = new THREE.Scene();
@@ -102,6 +146,7 @@ export const AeroPistonEngine3D: React.FC = () => {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.35;
+    rendererRef.current = renderer;
 
     // Clear canvas
     container.innerHTML = '';
@@ -193,14 +238,29 @@ export const AeroPistonEngine3D: React.FC = () => {
 
     renderer.domElement.addEventListener('pointerdown', handleCanvasClick);
 
-    // Resize Handler
+    // Dynamic ResizeObserver for seamless resizing when minimizing / expanding
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width;
+        const h = entry.contentRect.height;
+        if (w > 0 && h > 0 && cameraRef.current && rendererRef.current) {
+          cameraRef.current.aspect = w / h;
+          cameraRef.current.updateProjectionMatrix();
+          rendererRef.current.setSize(w, h);
+        }
+      }
+    });
+    resizeObserver.observe(container);
+
     const handleResize = () => {
-      if (!containerRef.current || !cameraRef.current) return;
+      if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
       const w = containerRef.current.clientWidth;
       const h = containerRef.current.clientHeight;
-      cameraRef.current.aspect = w / h;
-      cameraRef.current.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      if (w > 0 && h > 0) {
+        cameraRef.current.aspect = w / h;
+        cameraRef.current.updateProjectionMatrix();
+        rendererRef.current.setSize(w, h);
+      }
     };
 
     window.addEventListener('resize', handleResize);
@@ -271,8 +331,8 @@ export const AeroPistonEngine3D: React.FC = () => {
         });
       }
 
-      // Screen-Space Hotspot Projections with Avionics Leader Lines
-      if (showHotspots && cameraRef.current && modelRef.current && containerRef.current) {
+      // Screen-Space Hotspot Projections with Avionics Leader Lines (ONLY when enlarged, NOT minimized)
+      if (showHotspots && !isMinimizedRef.current && cameraRef.current && modelRef.current && containerRef.current) {
         const projectedHotspots: HotspotProjection[] = [];
         const w = containerRef.current.clientWidth;
         const h = containerRef.current.clientHeight;
@@ -321,7 +381,7 @@ export const AeroPistonEngine3D: React.FC = () => {
               isAlert = egt1 > 880;
             }
 
-            // Filtering logic to keep screen 100% clean
+            // Filtering logic to keep screen clean
             let include = true;
             if (hotspotFilter === 'ALERTS_ONLY' && !isAlert) include = false;
             else if (hotspotFilter === 'CRITICAL' && !['rpm', 'cht1', 'oil_pressure', 'map'].includes(comp.sensorKey)) include = false;
@@ -343,6 +403,8 @@ export const AeroPistonEngine3D: React.FC = () => {
         });
 
         setHotspotPositions(projectedHotspots);
+      } else if (isMinimizedRef.current) {
+        setHotspotPositions([]);
       }
 
       renderer.render(scene, camera);
@@ -352,6 +414,7 @@ export const AeroPistonEngine3D: React.FC = () => {
 
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       renderer.domElement.removeEventListener('pointerdown', handleCanvasClick);
       renderer.dispose();
@@ -460,352 +523,426 @@ export const AeroPistonEngine3D: React.FC = () => {
   };
 
   return (
-    <div
-      className={`relative bg-slate-950/90 border border-slate-800 rounded-xl overflow-hidden shadow-2xl transition-all duration-300 ${
-        isFullscreen ? 'fixed inset-0 z-50 rounded-none border-none' : 'w-full h-[700px]'
-      }`}
-    >
-      {/* 3D WebGL Canvas Container */}
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-
-      {/* SVG AVIONICS LEADER LINES OVERLAY (CONNECTS 3D ANCHORS TO HUD BADGES) */}
-      {showHotspots && (
-        <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
-          <defs>
-            <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.8" />
-              <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.4" />
-            </linearGradient>
-            <linearGradient id="lineAlertGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#ef4444" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.5" />
-            </linearGradient>
-          </defs>
-
-          {hotspotPositions.map((hs) => {
-            // Midpoint elbow joint for clean 45-degree avionics callout line
-            const midX = (hs.originX + hs.badgeX) / 2;
-            const midY = hs.badgeY;
-            const isAlert = hs.alert;
-            const isHover = hs.isHovered;
-
-            return (
-              <g key={`svg-line-${hs.id}`}>
-                {/* Reticle Target Circle at 3D Component Origin */}
-                <circle
-                  cx={hs.originX}
-                  cy={hs.originY}
-                  r={isHover ? 6 : 4}
-                  fill={isAlert ? '#ef4444' : '#38bdf8'}
-                  className="animate-pulse"
-                />
-                <circle
-                  cx={hs.originX}
-                  cy={hs.originY}
-                  r={isHover ? 12 : 8}
-                  fill="none"
-                  stroke={isAlert ? '#ef4444' : '#38bdf8'}
-                  strokeWidth="1.5"
-                  strokeDasharray="3 3"
-                />
-
-                {/* Leader Line Path with Elbow Joint */}
-                <polyline
-                  points={`${hs.originX},${hs.originY} ${midX},${midY} ${hs.badgeX},${hs.badgeY}`}
-                  fill="none"
-                  stroke={isAlert ? 'url(#lineAlertGrad)' : 'url(#lineGrad)'}
-                  strokeWidth={isHover ? '2.5' : '1.5'}
-                  strokeDasharray={isHover ? 'none' : '4 2'}
-                />
-              </g>
-            );
-          })}
-        </svg>
+    <div ref={sentinelRef} className="w-full relative">
+      {/* Static In-Flow Placeholder displayed when 3D viewport is minimized to PiP (prevents layout jumping) */}
+      {isMinimized && (
+        <div
+          onClick={scrollToHero}
+          className="w-full h-[620px] rounded-xl border border-dashed border-cyan-500/30 bg-slate-950/40 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center cursor-pointer group hover:border-cyan-500/60 transition-all"
+        >
+          <div className="w-14 h-14 rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform shadow-lg shadow-cyan-950/50">
+            <Box className="w-7 h-7 text-cyan-400 animate-pulse" />
+          </div>
+          <h4 className="font-mono text-sm font-bold text-cyan-300 tracking-wider">
+            3D DIGITAL TWIN ACTIVE IN FLOATING VIEW (TOP RIGHT)
+          </h4>
+          <p className="font-mono text-xs text-slate-400 mt-1.5 max-w-md">
+            The aero piston engine is docked in the top-right corner. Scroll back up or click below to restore full-size interactive telemetry HUD.
+          </p>
+          <button
+            onClick={scrollToHero}
+            className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-xs font-mono font-bold transition-all shadow-lg shadow-cyan-950/50"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+            Restore Full 3D Hero View
+          </button>
+        </div>
       )}
 
-      {/* Top Header Avionics HUD */}
-      <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none">
-        <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
-          <div className="w-3 h-3 rounded-full bg-cyan-400 animate-ping" />
-          <div>
-            <div className="flex items-center gap-2">
-              <Plane className="w-4 h-4 text-cyan-400" />
-              <h3 className="font-mono text-xs font-bold text-cyan-400 tracking-wider uppercase">
-                REAL MALE UAV AIRBORNE DRONE DIGITAL TWIN (N190TC)
-              </h3>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30 font-bold">
-                AIRBORNE 18,500 FT
-              </span>
-            </div>
-            <div className="flex items-center gap-4 text-[11px] text-slate-300 font-mono mt-1">
-              <span className="flex items-center gap-1 text-slate-400">
-                <Navigation className="w-3 h-3 text-cyan-400" /> ALT: {Math.round(altitude)} m (18,500 ft)
-              </span>
-              <span className="flex items-center gap-1 text-slate-400">
-                <Wind className="w-3 h-3 text-emerald-400" /> SPEED: 145 KTS
-              </span>
-              <span className="text-cyan-400 font-bold">ENGINE: {Math.round(rpm)} RPM</span>
-            </div>
-          </div>
-        </div>
+      {/* Actual 3D Container (transitions seamlessly between Hero Mode, Fullscreen, and PiP Mode) */}
+      <div
+        className={`transition-all duration-300 ease-out ${
+          isFullscreen
+            ? 'fixed inset-0 z-50 rounded-none border-none bg-slate-950 shadow-none'
+            : isMinimized
+            ? 'fixed top-20 right-6 z-50 w-80 h-52 sm:w-96 sm:h-60 rounded-xl border border-cyan-500/60 bg-slate-950/95 backdrop-blur-xl shadow-2xl shadow-cyan-950/90 ring-1 ring-cyan-500/30 overflow-hidden group hover:border-cyan-400'
+            : 'relative w-full h-[620px] rounded-xl border border-slate-800 bg-slate-950/90 shadow-2xl overflow-hidden'
+        }`}
+      >
+        {/* 3D WebGL Canvas Container */}
+        <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-        {/* View Mode Toolbar */}
-        <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
-          <button
-            onClick={() => setViewMode('REALISTIC')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              viewMode === 'REALISTIC'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Box className="w-3.5 h-3.5" />
-            1:1 Real Drone
-          </button>
+        {/* --- MINIMIZED (PiP) MODE OVERLAYS --- */}
+        {isMinimized && (
+          <>
+            {/* Top Compact Mini-HUD Bar */}
+            <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between z-20 pointer-events-auto">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900/90 backdrop-blur-md border border-slate-700/80 text-[10px] font-mono text-cyan-300 shadow-md">
+                <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />
+                <span className="font-bold tracking-wider">LIVE 3D TWIN</span>
+                <span className="text-slate-500">|</span>
+                <span className="text-emerald-300 font-bold">{Math.round(rpm)} RPM</span>
+              </div>
 
-          <button
-            onClick={() => setViewMode('EXPLODED')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              viewMode === 'EXPLODED'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            Exploded
-          </button>
-
-          <button
-            onClick={() => setViewMode('THERMAL')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              viewMode === 'THERMAL'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Flame className="w-3.5 h-3.5 text-amber-400" />
-            Thermal Heat
-          </button>
-
-          <button
-            onClick={() => setViewMode('XRAY')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              viewMode === 'XRAY'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5 text-emerald-400" />
-            Engine Cutaway
-          </button>
-
-          <button
-            onClick={() => setViewMode('WIREFRAME')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              viewMode === 'WIREFRAME'
-                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm shadow-blue-500/20 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Zap className="w-3.5 h-3.5 text-blue-400" />
-            Hologram
-          </button>
-
-          <div className="w-px h-5 bg-slate-700 mx-1" />
-
-          <button
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800"
-            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Floating Spatially Separated 3D Hotspot Sensor Badges */}
-      {showHotspots &&
-        hotspotPositions.map((hs) => (
-          <div
-            key={hs.id}
-            style={{ left: `${hs.badgeX}px`, top: `${hs.badgeY}px` }}
-            onMouseEnter={() => setHoveredHotspotId(hs.id)}
-            onMouseLeave={() => setHoveredHotspotId(null)}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto transition-all duration-150 ${
-              hs.isHovered ? 'z-30 scale-105' : hs.alert ? 'z-20' : 'z-10'
-            }`}
-          >
-            <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md backdrop-blur-lg border shadow-xl text-[11px] font-mono whitespace-nowrap cursor-pointer transition-all ${
-                hs.alert
-                  ? 'bg-rose-950/90 border-rose-500 text-rose-200 animate-pulse shadow-rose-900/50'
-                  : hs.isHovered
-                  ? 'bg-cyan-950/90 border-cyan-400 text-cyan-100 shadow-cyan-500/30'
-                  : 'bg-slate-900/85 border-slate-700/80 text-slate-200 hover:border-cyan-500/50'
-              }`}
-            >
-              <div className={`w-2.5 h-2.5 rounded-full ${hs.alert ? 'bg-rose-400 animate-ping' : 'bg-cyan-400'}`} />
-              <span className="text-slate-400">{hs.name}:</span>
-              <span className="font-bold text-cyan-300">{hs.val}</span>
-            </div>
-          </div>
-        ))}
-
-      {/* Bottom Control Bar with Hotspot Filter Options */}
-      <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
-        {/* Camera Angles Presets matching photo */}
-        <div className="flex items-center gap-2 bg-slate-900/85 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
-          <span className="text-[11px] font-mono text-slate-400 px-2 flex items-center gap-1">
-            <Sliders className="w-3 h-3 text-cyan-400" /> Flight View:
-          </span>
-          <button
-            onClick={() => setCameraPreset('PHOTO_ANGLE')}
-            className="px-2.5 py-1 text-[11px] font-mono rounded text-cyan-300 bg-cyan-500/20 hover:bg-slate-800 border border-cyan-500/40 font-bold"
-          >
-            📷 Reference Flight View
-          </button>
-          <button
-            onClick={() => setCameraPreset('REAR_PUSHER')}
-            className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
-          >
-            Rear Pusher Prop
-          </button>
-          <button
-            onClick={() => setCameraPreset('ENGINE_BAY')}
-            className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
-          >
-            Internal Engine Bay
-          </button>
-          <button
-            onClick={() => setCameraPreset('FULL_UAV')}
-            className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
-          >
-            High Altitude Flight
-          </button>
-        </div>
-
-        {/* Hotspot Filter & Display Controls */}
-        <div className="flex items-center gap-3 bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
-          {/* Exploded View Slider */}
-          {viewMode === 'EXPLODED' && (
-            <div className="flex items-center gap-2 font-mono text-xs text-slate-300">
-              <span className="text-cyan-400">Expansion:</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={explosionFactor}
-                onChange={(e) => setExplosionFactor(parseFloat(e.target.value))}
-                className="w-24 accent-cyan-400 cursor-pointer"
-              />
-              <span className="w-8 text-right font-mono text-[11px]">{Math.round(explosionFactor * 100)}%</span>
-            </div>
-          )}
-
-          {/* Filter Dropdown */}
-          <div className="flex items-center gap-1.5 text-xs font-mono">
-            <Filter className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="text-slate-400">Hotspots:</span>
-            <button
-              onClick={() => setHotspotFilter('ALL')}
-              className={`px-2 py-1 text-[11px] rounded transition-all ${
-                hotspotFilter === 'ALL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              All Metrics
-            </button>
-            <button
-              onClick={() => setHotspotFilter('CRITICAL')}
-              className={`px-2 py-1 text-[11px] rounded transition-all ${
-                hotspotFilter === 'CRITICAL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              Critical 4
-            </button>
-            <button
-              onClick={() => setHotspotFilter('ALERTS_ONLY')}
-              className={`px-2 py-1 text-[11px] rounded transition-all ${
-                hotspotFilter === 'ALERTS_ONLY' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              Alerts Only
-            </button>
-          </div>
-
-          <div className="w-px h-5 bg-slate-700 mx-1" />
-
-          {/* Auto Rotation Toggle */}
-          <button
-            onClick={() => setAutoRotate(!autoRotate)}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
-              autoRotate
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                : 'text-slate-400 hover:bg-slate-800'
-            }`}
-          >
-            {autoRotate ? <Pause className="w-3.5 h-3.5 text-emerald-400" /> : <Play className="w-3.5 h-3.5" />}
-            Auto Orbit
-          </button>
-
-          {/* Hotspots Toggle */}
-          <button
-            onClick={() => setShowHotspots(!showHotspots)}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
-              showHotspots
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                : 'text-slate-400 hover:bg-slate-800'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5 text-cyan-400" />
-            {showHotspots ? 'HUD On' : 'HUD Off'}
-          </button>
-        </div>
-      </div>
-
-      {/* Selected Component Modal Overlay */}
-      {selectedComponent && (
-        <div className="absolute top-16 right-4 w-80 bg-slate-900/90 backdrop-blur-md border border-cyan-500/40 p-4 rounded-xl shadow-2xl z-30 font-mono text-xs text-slate-200">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-700">
-            <div className="flex items-center gap-2">
-              <Box className="w-4 h-4 text-cyan-400" />
-              <span className="font-bold text-cyan-300">{selectedComponent.name}</span>
-            </div>
-            <button
-              onClick={() => setSelectedComponent(null)}
-              className="text-slate-400 hover:text-slate-100"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div className="mt-3 space-y-2 text-[11px]">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Callsign:</span>
-              <span className="text-slate-200">N190TC / DRDO PS-26054</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Airframe Composite:</span>
-              <span className="text-cyan-300 font-bold">Clearcoat Military Epoxy</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Flight Status:</span>
-              <span className="text-emerald-400 font-bold flex items-center gap-1">
-                <ShieldAlert className="w-3 h-3 text-emerald-400" /> AIRBORNE NOMINAL
-              </span>
+              <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1 rounded-md border border-slate-700/80 shadow-md">
+                <button
+                  onClick={scrollToHero}
+                  title="Expand 3D View"
+                  className="p-1 rounded hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 transition-colors"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setIsPipDismissed(true)}
+                  title="Dismiss Floating Window"
+                  className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
-            {selectedComponent.sensorKey && (
-              <div className="mt-2 p-2 bg-slate-800/80 rounded border border-slate-700 text-cyan-300 flex items-center justify-between">
-                <span>Telemetry Metric:</span>
-                <span className="font-bold">
-                  {selectedComponent.sensorKey.toUpperCase()}
+            {/* Bottom Subtle Interaction Hint */}
+            <div className="absolute bottom-1.5 left-2.5 right-2.5 flex justify-between items-center text-[9px] font-mono text-slate-400 bg-slate-900/80 px-2.5 py-0.5 rounded border border-slate-800/80 backdrop-blur-sm pointer-events-none">
+              <span>Drag to orbit</span>
+              <span className="text-cyan-400 font-bold">Click ⛶ to expand</span>
+            </div>
+          </>
+        )}
+
+        {/* --- ENLARGED (HERO / FULLSCREEN) MODE OVERLAYS --- */}
+        {!isMinimized && (
+          <>
+            {/* SVG AVIONICS LEADER LINES OVERLAY (CONNECTS 3D ANCHORS TO HUD BADGES) */}
+            {showHotspots && (
+              <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
+                <defs>
+                  <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.8" />
+                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.4" />
+                  </linearGradient>
+                  <linearGradient id="lineAlertGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#ef4444" stopOpacity="0.9" />
+                    <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.5" />
+                  </linearGradient>
+                </defs>
+
+                {hotspotPositions.map((hs) => {
+                  const midX = (hs.originX + hs.badgeX) / 2;
+                  const midY = hs.badgeY;
+                  const isAlert = hs.alert;
+                  const isHover = hs.isHovered;
+
+                  return (
+                    <g key={`svg-line-${hs.id}`}>
+                      {/* Reticle Target Circle at 3D Component Origin */}
+                      <circle
+                        cx={hs.originX}
+                        cy={hs.originY}
+                        r={isHover ? 6 : 4}
+                        fill={isAlert ? '#ef4444' : '#38bdf8'}
+                        className="animate-pulse"
+                      />
+                      <circle
+                        cx={hs.originX}
+                        cy={hs.originY}
+                        r={isHover ? 12 : 8}
+                        fill="none"
+                        stroke={isAlert ? '#ef4444' : '#38bdf8'}
+                        strokeWidth="1.5"
+                        strokeDasharray="3 3"
+                      />
+
+                      {/* Leader Line Path with Elbow Joint */}
+                      <polyline
+                        points={`${hs.originX},${hs.originY} ${midX},${midY} ${hs.badgeX},${hs.badgeY}`}
+                        fill="none"
+                        stroke={isAlert ? 'url(#lineAlertGrad)' : 'url(#lineGrad)'}
+                        strokeWidth={isHover ? '2.5' : '1.5'}
+                        strokeDasharray={isHover ? 'none' : '4 2'}
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
+            )}
+
+            {/* Top Header Avionics HUD */}
+            <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
+              <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
+                <div className="w-3 h-3 rounded-full bg-cyan-400 animate-ping" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Plane className="w-4 h-4 text-cyan-400" />
+                    <h3 className="font-mono text-xs font-bold text-cyan-400 tracking-wider uppercase">
+                      MALE UAV PROPULSION DIGITAL TWIN (N190TC)
+                    </h3>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30 font-bold">
+                      AIRBORNE 18,500 FT
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-[11px] text-slate-300 font-mono mt-1">
+                    <span className="flex items-center gap-1 text-slate-400">
+                      <Navigation className="w-3 h-3 text-cyan-400" /> ALT: {Math.round(altitude)} m (18,500 ft)
+                    </span>
+                    <span className="flex items-center gap-1 text-slate-400">
+                      <Wind className="w-3 h-3 text-emerald-400" /> SPEED: 145 KTS
+                    </span>
+                    <span className="text-cyan-400 font-bold">ENGINE: {Math.round(rpm)} RPM</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* View Mode Toolbar */}
+              <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
+                <button
+                  onClick={() => setViewMode('REALISTIC')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                    viewMode === 'REALISTIC'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <Box className="w-3.5 h-3.5" />
+                  1:1 Real Drone
+                </button>
+
+                <button
+                  onClick={() => setViewMode('EXPLODED')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                    viewMode === 'EXPLODED'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  Exploded
+                </button>
+
+                <button
+                  onClick={() => setViewMode('THERMAL')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                    viewMode === 'THERMAL'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20 font-bold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <Flame className="w-3.5 h-3.5 text-amber-400" />
+                  Thermal Heat
+                </button>
+
+                <button
+                  onClick={() => setViewMode('XRAY')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                    viewMode === 'XRAY'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20 font-bold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                  Engine Cutaway
+                </button>
+
+                <button
+                  onClick={() => setViewMode('WIREFRAME')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                    viewMode === 'WIREFRAME'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm shadow-blue-500/20 font-bold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5 text-blue-400" />
+                  Hologram
+                </button>
+
+                <div className="w-px h-5 bg-slate-700 mx-1" />
+
+                <button
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="p-1.5 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800"
+                  title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                >
+                  {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Floating Spatially Separated 3D Hotspot Sensor Badges with Exact Values */}
+            {showHotspots &&
+              hotspotPositions.map((hs) => (
+                <div
+                  key={hs.id}
+                  style={{ left: `${hs.badgeX}px`, top: `${hs.badgeY}px` }}
+                  onMouseEnter={() => setHoveredHotspotId(hs.id)}
+                  onMouseLeave={() => setHoveredHotspotId(null)}
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto transition-all duration-150 ${
+                    hs.isHovered ? 'z-30 scale-105' : hs.alert ? 'z-20' : 'z-10'
+                  }`}
+                >
+                  <div
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md backdrop-blur-lg border shadow-xl text-[11px] font-mono whitespace-nowrap cursor-pointer transition-all ${
+                      hs.alert
+                        ? 'bg-rose-950/90 border-rose-500 text-rose-200 animate-pulse shadow-rose-900/50'
+                        : hs.isHovered
+                        ? 'bg-cyan-950/90 border-cyan-400 text-cyan-100 shadow-cyan-500/30'
+                        : 'bg-slate-900/85 border-slate-700/80 text-slate-200 hover:border-cyan-500/50'
+                    }`}
+                  >
+                    <div className={`w-2.5 h-2.5 rounded-full ${hs.alert ? 'bg-rose-400 animate-ping' : 'bg-cyan-400'}`} />
+                    <span className="text-slate-400">{hs.name}:</span>
+                    <span className="font-bold text-cyan-300">{hs.val}</span>
+                  </div>
+                </div>
+              ))}
+
+            {/* Bottom Control Bar with Hotspot Filter Options */}
+            <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
+              {/* Camera Angles Presets */}
+              <div className="flex items-center gap-2 bg-slate-900/85 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
+                <span className="text-[11px] font-mono text-slate-400 px-2 flex items-center gap-1">
+                  <Sliders className="w-3 h-3 text-cyan-400" /> Flight View:
                 </span>
+                <button
+                  onClick={() => setCameraPreset('PHOTO_ANGLE')}
+                  className="px-2.5 py-1 text-[11px] font-mono rounded text-cyan-300 bg-cyan-500/20 hover:bg-slate-800 border border-cyan-500/40 font-bold"
+                >
+                  📷 Reference Flight View
+                </button>
+                <button
+                  onClick={() => setCameraPreset('REAR_PUSHER')}
+                  className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
+                >
+                  Rear Pusher Prop
+                </button>
+                <button
+                  onClick={() => setCameraPreset('ENGINE_BAY')}
+                  className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
+                >
+                  Internal Engine Bay
+                </button>
+                <button
+                  onClick={() => setCameraPreset('FULL_UAV')}
+                  className="px-2.5 py-1 text-[11px] font-mono rounded text-slate-300 hover:bg-slate-800 border border-slate-700/50"
+                >
+                  High Altitude Flight
+                </button>
+              </div>
+
+              {/* Hotspot Filter & Display Controls */}
+              <div className="flex items-center gap-3 bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-slate-700/60 pointer-events-auto">
+                {/* Exploded View Slider */}
+                {viewMode === 'EXPLODED' && (
+                  <div className="flex items-center gap-2 font-mono text-xs text-slate-300">
+                    <span className="text-cyan-400">Expansion:</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={explosionFactor}
+                      onChange={(e) => setExplosionFactor(parseFloat(e.target.value))}
+                      className="w-24 accent-cyan-400 cursor-pointer"
+                    />
+                    <span className="w-8 text-right font-mono text-[11px]">{Math.round(explosionFactor * 100)}%</span>
+                  </div>
+                )}
+
+                {/* Filter Dropdown */}
+                <div className="flex items-center gap-1.5 text-xs font-mono">
+                  <Filter className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="text-slate-400">Hotspots:</span>
+                  <button
+                    onClick={() => setHotspotFilter('ALL')}
+                    className={`px-2 py-1 text-[11px] rounded transition-all ${
+                      hotspotFilter === 'ALL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    All Metrics
+                  </button>
+                  <button
+                    onClick={() => setHotspotFilter('CRITICAL')}
+                    className={`px-2 py-1 text-[11px] rounded transition-all ${
+                      hotspotFilter === 'CRITICAL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    Critical 4
+                  </button>
+                  <button
+                    onClick={() => setHotspotFilter('ALERTS_ONLY')}
+                    className={`px-2 py-1 text-[11px] rounded transition-all ${
+                      hotspotFilter === 'ALERTS_ONLY' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    Alerts Only
+                  </button>
+                </div>
+
+                <div className="w-px h-5 bg-slate-700 mx-1" />
+
+                {/* Auto Rotation Toggle */}
+                <button
+                  onClick={() => setAutoRotate(!autoRotate)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
+                    autoRotate
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  {autoRotate ? <Pause className="w-3.5 h-3.5 text-emerald-400" /> : <Play className="w-3.5 h-3.5" />}
+                  Auto Orbit
+                </button>
+
+                {/* Hotspots Toggle */}
+                <button
+                  onClick={() => setShowHotspots(!showHotspots)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
+                    showHotspots
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                  {showHotspots ? 'HUD On' : 'HUD Off'}
+                </button>
+              </div>
+            </div>
+
+            {/* Selected Component Modal Overlay */}
+            {selectedComponent && (
+              <div className="absolute top-16 right-4 w-80 bg-slate-900/90 backdrop-blur-md border border-cyan-500/40 p-4 rounded-xl shadow-2xl z-30 font-mono text-xs text-slate-200">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-700">
+                  <div className="flex items-center gap-2">
+                    <Box className="w-4 h-4 text-cyan-400" />
+                    <span className="font-bold text-cyan-300">{selectedComponent.name}</span>
+                  </div>
+                  <button
+                    onClick={() => setSelectedComponent(null)}
+                    className="text-slate-400 hover:text-slate-100"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="mt-3 space-y-2 text-[11px]">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Callsign:</span>
+                    <span className="text-slate-200">N190TC / DRDO PS-26054</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Airframe Composite:</span>
+                    <span className="text-cyan-300 font-bold">Clearcoat Military Epoxy</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Flight Status:</span>
+                    <span className="text-emerald-400 font-bold flex items-center gap-1">
+                      <ShieldAlert className="w-3 h-3 text-emerald-400" /> AIRBORNE NOMINAL
+                    </span>
+                  </div>
+
+                  {selectedComponent.sensorKey && (
+                    <div className="mt-2 p-2 bg-slate-800/80 rounded border border-slate-700 text-cyan-300 flex items-center justify-between">
+                      <span>Telemetry Metric:</span>
+                      <span className="font-bold">
+                        {selectedComponent.sensorKey.toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 };

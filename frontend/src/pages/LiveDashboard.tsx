@@ -33,11 +33,11 @@ export const LiveDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Primary Sensor Gauges Matrix */}
-      <TelemetryGrid />
-
-      {/* Interactive 3D Aero Piston Engine Digital Twin */}
+      {/* Hero: Interactive 3D Aero Piston Engine Digital Twin */}
       <AeroPistonEngine3D />
+
+      {/* Primary Sensor Gauges Matrix directly below 3D Model */}
+      <TelemetryGrid />
 
       {/* Middle Row: Live Physics Charts + Real-time Advisory Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
