@@ -526,16 +526,16 @@ export function createAeroPistonEngineModel(): BuiltEngineModel {
     '3-Blade Pusher Propeller',
     propellerGroup,
     new THREE.Vector3(0, 0, -1.8),
-    new THREE.Vector3(0, 2.2, -4.2), // Spatially offset upward aft callout
+    new THREE.Vector3(0, 1.4, 0.4), // Relative upward callout offset
     'rpm'
   );
 
   // 4 Cylinders - Spatially Offset Left & Right Outer Callout Vectors!
   const cylinderConfigs = [
-    { side: 1, z: -0.6, idx: 0, id: 'cylinder_1', name: 'Cylinder #1 (Right Front)', key: 'cht1', offset: new THREE.Vector3(3.2, 1.6, -0.2) },
-    { side: 1, z: -1.6, idx: 1, id: 'cylinder_2', name: 'Cylinder #2 (Right Rear)', key: 'cht2', offset: new THREE.Vector3(3.6, -1.2, -2.0) },
-    { side: -1, z: -1.0, idx: 2, id: 'cylinder_3', name: 'Cylinder #3 (Left Front)', key: 'cht3', offset: new THREE.Vector3(-3.2, 1.6, -0.6) },
-    { side: -1, z: -2.0, idx: 3, id: 'cylinder_4', name: 'Cylinder #4 (Left Rear)', key: 'cht4', offset: new THREE.Vector3(-3.6, -1.2, -2.4) },
+    { side: 1, z: -0.6, idx: 0, id: 'cylinder_1', name: 'Cylinder #1 (Right Front)', key: 'cht1', offset: new THREE.Vector3(1.6, 0.9, 0.2) },
+    { side: 1, z: -1.6, idx: 1, id: 'cylinder_2', name: 'Cylinder #2 (Right Rear)', key: 'cht2', offset: new THREE.Vector3(1.8, -0.7, -0.2) },
+    { side: -1, z: -1.0, idx: 2, id: 'cylinder_3', name: 'Cylinder #3 (Left Front)', key: 'cht3', offset: new THREE.Vector3(-1.6, 0.9, 0.2) },
+    { side: -1, z: -2.0, idx: 3, id: 'cylinder_4', name: 'Cylinder #4 (Left Rear)', key: 'cht4', offset: new THREE.Vector3(-1.8, -0.7, -0.2) },
   ];
 
   cylinderConfigs.forEach((cfg) => {
@@ -600,18 +600,19 @@ export function createAeroPistonEngineModel(): BuiltEngineModel {
     'Rotax Turbocharger',
     turboGroup,
     new THREE.Vector3(0, 1.0, -0.4),
-    new THREE.Vector3(0, 2.6, -2.1), // Top center callout vector
+    new THREE.Vector3(0, 1.4, 0.3), // Top callout vector
     'map'
   );
 
   // Exhaust - Offset Rear Bottom Callout Vector
   const exhaustGroup = new THREE.Group();
+  exhaustGroup.position.set(0, -0.6, -1.8);
   cylinderConfigs.forEach((cfg) => {
     const sideSign = cfg.side;
     const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(sideSign * 1.2, -0.2, cfg.z),
-      new THREE.Vector3(sideSign * 0.7, -0.7, cfg.z * 0.8),
-      new THREE.Vector3(0, -0.9, -2.4),
+      new THREE.Vector3(sideSign * 1.2, 0.4, cfg.z + 1.8),
+      new THREE.Vector3(sideSign * 0.7, -0.1, (cfg.z + 1.8) * 0.8),
+      new THREE.Vector3(0, -0.3, -0.6),
     ]);
     const exhMesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.1, 16, false), exhaustHot);
     exhaustGroup.add(exhMesh);
@@ -623,7 +624,7 @@ export function createAeroPistonEngineModel(): BuiltEngineModel {
     'Exhaust Header & Collector',
     exhaustGroup,
     new THREE.Vector3(0, -1.0, -0.4),
-    new THREE.Vector3(0, -2.4, -3.2), // Rear bottom callout vector
+    new THREE.Vector3(0.9, -0.9, -0.4), // Rear bottom right callout vector
     'egt1'
   );
 

@@ -75,6 +75,27 @@ export const AeroPistonEngine3D: React.FC = () => {
   const map = telemetry?.map ?? 28.5;
   const altitude = telemetry?.altitude_m ?? 5638;
 
+  // System Health & Anomaly State Extraction
+  const healthStatus = currentFrame?.health_status ?? 'NOMINAL';
+  const isAnomalyDetected = Boolean(
+    currentFrame?.anomaly_detection?.is_anomaly ||
+    currentFrame?.diagnostic?.anomaly_detected ||
+    (healthStatus && healthStatus !== 'NOMINAL' && healthStatus !== 'NORMAL') ||
+    (currentFrame?.fault_classification?.predicted_fault && 
+     currentFrame.fault_classification.predicted_fault !== 'normal' &&
+     currentFrame.fault_classification.predicted_fault !== 'NORMAL')
+  );
+  const predictedFault = currentFrame?.fault_classification?.predicted_fault ?? currentFrame?.diagnostic?.fault ?? 'normal';
+  const faultDisplayName = predictedFault && predictedFault !== 'normal' && predictedFault !== 'NORMAL'
+    ? predictedFault.replace(/_/g, ' ').toUpperCase()
+    : isAnomalyDetected
+    ? 'ANOMALY DETECTED'
+    : 'NOMINAL';
+  const healthPct = Math.round(
+    currentFrame?.degradation_estimation?.estimated_health_pct ??
+    (isAnomalyDetected ? 74 : 99)
+  );
+
   // Scene references
   const modelRef = useRef<BuiltEngineModel | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -336,68 +357,95 @@ export const AeroPistonEngine3D: React.FC = () => {
         const projectedHotspots: HotspotProjection[] = [];
         const w = containerRef.current.clientWidth;
         const h = containerRef.current.clientHeight;
+        const camera = cameraRef.current;
+
+        const cameraDir = new THREE.Vector3();
+        camera.getWorldDirection(cameraDir);
 
         modelRef.current.components.forEach((comp) => {
           if (!comp.sensorKey) return;
 
-          // Component origin in 3D
-          const compWorldOrigin = comp.group.position.clone();
-          compWorldOrigin.project(cameraRef.current!);
+          // Component origin in 3D Scene World coordinates
+          const compWorldOrigin = new THREE.Vector3();
+          comp.group.getWorldPosition(compWorldOrigin);
 
-          // Spatially offset callout point in 3D
-          const compWorldOffset = comp.group.position.clone().add(comp.hotspotOffset);
-          compWorldOffset.project(cameraRef.current!);
+          // Component callout offset transformed rigidly with the component in World coordinates
+          const compWorldOffset = comp.hotspotOffset.clone();
+          comp.group.localToWorld(compWorldOffset);
 
-          if (compWorldOrigin.z < 1.0 && compWorldOffset.z < 1.0) {
-            const originX = (compWorldOrigin.x * 0.5 + 0.5) * w;
-            const originY = (-(compWorldOrigin.y * 0.5) + 0.5) * h;
+          // Vector from camera position to world points
+          const toOrigin = new THREE.Vector3().subVectors(compWorldOrigin, camera.position);
+          const toOffset = new THREE.Vector3().subVectors(compWorldOffset, camera.position);
 
-            const badgeX = (compWorldOffset.x * 0.5 + 0.5) * w;
-            const badgeY = (-(compWorldOffset.y * 0.5) + 0.5) * h;
+          // Check if points are in front of the camera plane
+          const dotOrigin = cameraDir.dot(toOrigin);
+          const dotOffset = cameraDir.dot(toOffset);
 
-            let valStr = '';
-            let isAlert = false;
+          if (dotOrigin > 0.3 && dotOffset > 0.3) {
+            const originNdc = compWorldOrigin.clone().project(camera);
+            const offsetNdc = compWorldOffset.clone().project(camera);
 
-            if (comp.sensorKey === 'rpm') valStr = `${Math.round(activeRpm)} RPM`;
-            else if (comp.sensorKey === 'cht1') {
-              valStr = `${Math.round(cht1)}°C`;
-              isAlert = cht1 > 175;
-            } else if (comp.sensorKey === 'cht2') {
-              valStr = `${Math.round(cht2)}°C`;
-              isAlert = cht2 > 175;
-            } else if (comp.sensorKey === 'cht3') {
-              valStr = `${Math.round(cht3)}°C`;
-              isAlert = cht3 > 175;
-            } else if (comp.sensorKey === 'cht4') {
-              valStr = `${Math.round(cht4)}°C`;
-              isAlert = cht4 > 175;
-            } else if (comp.sensorKey === 'oil_pressure') {
-              valStr = `${oilPressure.toFixed(1)} bar`;
-              isAlert = oilPressure < 2.0;
-            } else if (comp.sensorKey === 'map') {
-              valStr = `${map.toFixed(1)} inHg`;
-            } else if (comp.sensorKey === 'egt1') {
-              valStr = `${Math.round(egt1)}°C`;
-              isAlert = egt1 > 880;
-            }
+            // Verify points are within or near viewport boundaries
+            if (
+              originNdc.z > -1.0 && originNdc.z < 1.0 &&
+              offsetNdc.z > -1.0 && offsetNdc.z < 1.0 &&
+              originNdc.x >= -1.25 && originNdc.x <= 1.25 &&
+              originNdc.y >= -1.25 && originNdc.y <= 1.25
+            ) {
+              const originX = (originNdc.x * 0.5 + 0.5) * w;
+              const originY = (-(originNdc.y * 0.5) + 0.5) * h;
 
-            // Filtering logic to keep screen clean
-            let include = true;
-            if (hotspotFilter === 'ALERTS_ONLY' && !isAlert) include = false;
-            else if (hotspotFilter === 'CRITICAL' && !['rpm', 'cht1', 'oil_pressure', 'map'].includes(comp.sensorKey)) include = false;
+              const rawBadgeX = (offsetNdc.x * 0.5 + 0.5) * w;
+              const rawBadgeY = (-(offsetNdc.y * 0.5) + 0.5) * h;
 
-            if (include) {
-              projectedHotspots.push({
-                id: comp.id,
-                name: comp.name,
-                val: valStr,
-                originX,
-                originY,
-                badgeX,
-                badgeY,
-                alert: isAlert,
-                isHovered: comp.id === hoveredHotspotId,
-              });
+              // Keep badge securely within screen padding
+              const badgeX = Math.max(90, Math.min(w - 90, rawBadgeX));
+              const badgeY = Math.max(45, Math.min(h - 50, rawBadgeY));
+
+              let valStr = '';
+              let isAlert = false;
+
+              if (comp.sensorKey === 'rpm') valStr = `${Math.round(activeRpm)} RPM`;
+              else if (comp.sensorKey === 'cht1') {
+                valStr = `${Math.round(cht1)}°C`;
+                isAlert = cht1 > 175;
+              } else if (comp.sensorKey === 'cht2') {
+                valStr = `${Math.round(cht2)}°C`;
+                isAlert = cht2 > 175;
+              } else if (comp.sensorKey === 'cht3') {
+                valStr = `${Math.round(cht3)}°C`;
+                isAlert = cht3 > 175;
+              } else if (comp.sensorKey === 'cht4') {
+                valStr = `${Math.round(cht4)}°C`;
+                isAlert = cht4 > 175;
+              } else if (comp.sensorKey === 'oil_pressure') {
+                valStr = `${oilPressure.toFixed(1)} bar`;
+                isAlert = oilPressure < 2.0;
+              } else if (comp.sensorKey === 'map') {
+                valStr = `${map.toFixed(1)} inHg`;
+              } else if (comp.sensorKey === 'egt1') {
+                valStr = `${Math.round(egt1)}°C`;
+                isAlert = egt1 > 880;
+              }
+
+              // Filtering logic to keep screen clean
+              let include = true;
+              if (hotspotFilter === 'ALERTS_ONLY' && !isAlert) include = false;
+              else if (hotspotFilter === 'CRITICAL' && !['rpm', 'cht1', 'oil_pressure', 'map'].includes(comp.sensorKey)) include = false;
+
+              if (include) {
+                projectedHotspots.push({
+                  id: comp.id,
+                  name: comp.name,
+                  val: valStr,
+                  originX,
+                  originY,
+                  badgeX,
+                  badgeY,
+                  alert: isAlert,
+                  isHovered: comp.id === hoveredHotspotId,
+                });
+              }
             }
           }
         });
@@ -565,19 +613,36 @@ export const AeroPistonEngine3D: React.FC = () => {
         {/* --- MINIMIZED (PiP) MODE OVERLAYS --- */}
         {isMinimized && (
           <>
-            {/* Top Compact Mini-HUD Bar */}
-            <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between z-20 pointer-events-auto">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900/90 backdrop-blur-md border border-slate-700/80 text-[10px] font-mono text-cyan-300 shadow-md">
-                <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />
-                <span className="font-bold tracking-wider">LIVE 3D TWIN</span>
-                <span className="text-slate-500">|</span>
-                <span className="text-emerald-300 font-bold">{Math.round(rpm)} RPM</span>
+            {/* Top Compact Mini-HUD Bar with Live Nominal / Anomaly Status */}
+            <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between z-20 pointer-events-auto gap-2">
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                {/* Nominal vs Anomaly Status Badge */}
+                {isAnomalyDetected ? (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-950/95 border border-rose-500 text-rose-200 font-mono font-bold text-[10px] animate-pulse shadow-lg shadow-rose-950/80">
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span className="truncate">{faultDisplayName}</span>
+                    <span className="text-rose-500/70">|</span>
+                    <span className="text-rose-300 shrink-0">{healthPct}% HP</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 font-mono font-bold text-[10px] shadow-lg shadow-emerald-950/50">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                    <span>NOMINAL</span>
+                    <span className="text-emerald-500/70">|</span>
+                    <span className="text-emerald-200 shrink-0">{healthPct}% HP</span>
+                  </div>
+                )}
+
+                <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900/90 backdrop-blur-md border border-slate-700/80 text-[10px] font-mono text-cyan-300 shadow-md shrink-0">
+                  <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />
+                  <span className="font-bold">{Math.round(rpm)} RPM</span>
+                </div>
               </div>
 
-              <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1 rounded-md border border-slate-700/80 shadow-md">
+              <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1 rounded-md border border-slate-700/80 shadow-md shrink-0">
                 <button
                   onClick={scrollToHero}
-                  title="Expand 3D View"
+                  title="Expand Full 3D View"
                   className="p-1 rounded hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 transition-colors"
                 >
                   <Maximize2 className="w-3.5 h-3.5" />
@@ -592,10 +657,22 @@ export const AeroPistonEngine3D: React.FC = () => {
               </div>
             </div>
 
-            {/* Bottom Subtle Interaction Hint */}
-            <div className="absolute bottom-1.5 left-2.5 right-2.5 flex justify-between items-center text-[9px] font-mono text-slate-400 bg-slate-900/80 px-2.5 py-0.5 rounded border border-slate-800/80 backdrop-blur-sm pointer-events-none">
-              <span>Drag to orbit</span>
-              <span className="text-cyan-400 font-bold">Click ⛶ to expand</span>
+            {/* Bottom Subtle Interaction & Telemetry Bar */}
+            <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-[9px] font-mono text-slate-300 bg-slate-950/90 px-2.5 py-1 rounded-md border border-slate-800 backdrop-blur-md pointer-events-none">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">ALT:</span>
+                <span className="text-cyan-300 font-bold">{Math.round(altitude)}m</span>
+                <span className="text-slate-600">•</span>
+                <span className="text-slate-400">RPM:</span>
+                <span className="text-emerald-300 font-bold">{Math.round(rpm)}</span>
+              </div>
+              <button
+                onClick={scrollToHero}
+                className="text-cyan-400 font-bold tracking-wider pointer-events-auto hover:underline flex items-center gap-1"
+              >
+                <span>RESTORE FULL HUD</span>
+                <Maximize2 className="w-2.5 h-2.5" />
+              </button>
             </div>
           </>
         )}
@@ -608,12 +685,12 @@ export const AeroPistonEngine3D: React.FC = () => {
               <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
                 <defs>
                   <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.8" />
-                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.4" />
+                    <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.85" />
+                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.45" />
                   </linearGradient>
                   <linearGradient id="lineAlertGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#ef4444" stopOpacity="0.9" />
-                    <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.5" />
+                    <stop offset="0%" stopColor="#ef4444" stopOpacity="0.95" />
+                    <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.55" />
                   </linearGradient>
                 </defs>
 
@@ -636,20 +713,50 @@ export const AeroPistonEngine3D: React.FC = () => {
                       <circle
                         cx={hs.originX}
                         cy={hs.originY}
-                        r={isHover ? 12 : 8}
+                        r={isHover ? 13 : 9}
                         fill="none"
                         stroke={isAlert ? '#ef4444' : '#38bdf8'}
                         strokeWidth="1.5"
                         strokeDasharray="3 3"
                       />
 
-                      {/* Leader Line Path with Elbow Joint */}
+                      {/* Reticle Crosshair Hairlines on the 3D Part */}
+                      <line
+                        x1={hs.originX - (isHover ? 8 : 6)}
+                        y1={hs.originY}
+                        x2={hs.originX + (isHover ? 8 : 6)}
+                        y2={hs.originY}
+                        stroke={isAlert ? '#ef4444' : '#38bdf8'}
+                        strokeWidth="1"
+                        opacity="0.8"
+                      />
+                      <line
+                        x1={hs.originX}
+                        y1={hs.originY - (isHover ? 8 : 6)}
+                        x2={hs.originX}
+                        y2={hs.originY + (isHover ? 8 : 6)}
+                        stroke={isAlert ? '#ef4444' : '#38bdf8'}
+                        strokeWidth="1"
+                        opacity="0.8"
+                      />
+
+                      {/* Leader Line Path from 3D Origin -> Elbow -> HUD Badge */}
                       <polyline
                         points={`${hs.originX},${hs.originY} ${midX},${midY} ${hs.badgeX},${hs.badgeY}`}
                         fill="none"
                         stroke={isAlert ? 'url(#lineAlertGrad)' : 'url(#lineGrad)'}
                         strokeWidth={isHover ? '2.5' : '1.5'}
                         strokeDasharray={isHover ? 'none' : '4 2'}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+
+                      {/* Terminal Anchor Dot at Badge Base */}
+                      <circle
+                        cx={hs.badgeX}
+                        cy={hs.badgeY}
+                        r="2.5"
+                        fill={isAlert ? '#ef4444' : '#06b6d4'}
                       />
                     </g>
                   );
@@ -765,22 +872,22 @@ export const AeroPistonEngine3D: React.FC = () => {
                   style={{ left: `${hs.badgeX}px`, top: `${hs.badgeY}px` }}
                   onMouseEnter={() => setHoveredHotspotId(hs.id)}
                   onMouseLeave={() => setHoveredHotspotId(null)}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto transition-all duration-150 ${
-                    hs.isHovered ? 'z-30 scale-105' : hs.alert ? 'z-20' : 'z-10'
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto transition-transform duration-100 ${
+                    hs.isHovered ? 'z-30 scale-105' : hs.alert ? 'z-20 scale-100' : 'z-10'
                   }`}
                 >
                   <div
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md backdrop-blur-lg border shadow-xl text-[11px] font-mono whitespace-nowrap cursor-pointer transition-all ${
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg backdrop-blur-md border shadow-2xl text-[11px] font-mono whitespace-nowrap cursor-pointer transition-all ${
                       hs.alert
-                        ? 'bg-rose-950/90 border-rose-500 text-rose-200 animate-pulse shadow-rose-900/50'
+                        ? 'bg-rose-950/95 border-rose-500 text-rose-200 animate-pulse shadow-rose-900/60 ring-1 ring-rose-400/50'
                         : hs.isHovered
-                        ? 'bg-cyan-950/90 border-cyan-400 text-cyan-100 shadow-cyan-500/30'
-                        : 'bg-slate-900/85 border-slate-700/80 text-slate-200 hover:border-cyan-500/50'
+                        ? 'bg-cyan-950/95 border-cyan-400 text-cyan-100 shadow-cyan-500/40 ring-1 ring-cyan-400/50'
+                        : 'bg-slate-950/90 border-slate-700/80 text-slate-200 hover:border-cyan-500/60 shadow-black/80'
                     }`}
                   >
-                    <div className={`w-2.5 h-2.5 rounded-full ${hs.alert ? 'bg-rose-400 animate-ping' : 'bg-cyan-400'}`} />
-                    <span className="text-slate-400">{hs.name}:</span>
-                    <span className="font-bold text-cyan-300">{hs.val}</span>
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${hs.alert ? 'bg-rose-400 animate-ping' : 'bg-cyan-400'}`} />
+                    <span className="text-slate-400 font-medium">{hs.name.split(' (')[0]}:</span>
+                    <span className={`font-bold ${hs.alert ? 'text-rose-300' : 'text-cyan-300'}`}>{hs.val}</span>
                   </div>
                 </div>
               ))}
