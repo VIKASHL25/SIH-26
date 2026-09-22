@@ -106,16 +106,16 @@ export const AeroPistonEngine3D: React.FC = () => {
     currentFrame?.anomaly_detection?.is_anomaly ||
     currentFrame?.diagnostic?.anomaly_detected ||
     (healthStatus && healthStatus !== 'NOMINAL' && healthStatus !== 'NORMAL') ||
-    (currentFrame?.fault_classification?.predicted_fault && 
-     currentFrame.fault_classification.predicted_fault !== 'normal' &&
-     currentFrame.fault_classification.predicted_fault !== 'NORMAL')
+    (currentFrame?.fault_classification?.predicted_fault &&
+      currentFrame.fault_classification.predicted_fault !== 'normal' &&
+      currentFrame.fault_classification.predicted_fault !== 'NORMAL')
   );
   const predictedFault = currentFrame?.fault_classification?.predicted_fault ?? currentFrame?.diagnostic?.fault ?? 'normal';
   const faultDisplayName = predictedFault && predictedFault !== 'normal' && predictedFault !== 'NORMAL'
     ? predictedFault.replace(/_/g, ' ').toUpperCase()
     : isAnomalyDetected
-    ? 'ANOMALY DETECTED'
-    : 'NOMINAL';
+      ? 'ANOMALY DETECTED'
+      : 'NOMINAL';
   const healthPct = Math.round(
     currentFrame?.degradation_estimation?.estimated_health_pct ??
     (isAnomalyDetected ? 74 : 99)
@@ -137,10 +137,12 @@ export const AeroPistonEngine3D: React.FC = () => {
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 600;
 
-    // Scene with dark aerospace environment
+    // Transparent Three.js scene — sky is handled by CSS
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a101f);
-    scene.fog = new THREE.FogExp2(0x0a101f, 0.015);
+
+    scene.background = null;
+    scene.fog = null;
+
     sceneRef.current = scene;
 
     // Camera
@@ -155,6 +157,10 @@ export const AeroPistonEngine3D: React.FC = () => {
       powerPreference: 'high-performance',
       precision: 'mediump',
     });
+
+    // Make WebGL canvas transparent so CSS sky is visible
+    renderer.setClearColor(0x000000, 0);
+
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = true;
@@ -502,8 +508,16 @@ export const AeroPistonEngine3D: React.FC = () => {
             }
           } else {
             // REALISTIC Mode matching physical materials
-            if (comp.id === 'male_uav_airframe') mesh.material = materials.uavMainPhysicalSkin;
-            else if (comp.id === 'crankcase') mesh.material = materials.castAluminum;
+            if (comp.id === 'male_uav_airframe') {
+              mesh.material = new THREE.MeshStandardMaterial({
+                color: 0x9aaeb8,
+                metalness: 0.65,
+                roughness: 0.38,
+              });
+            }
+            else if (comp.id === 'crankcase') {
+              mesh.material = materials.castAluminum;
+            }
             else if (comp.id.startsWith('cylinder')) {
               if (mesh.name.includes('head') || (mesh.geometry && mesh.geometry.type === 'BoxGeometry')) {
                 mesh.material = materials.rotaxGreenValve;
@@ -555,15 +569,55 @@ export const AeroPistonEngine3D: React.FC = () => {
   return (
     <div className="w-full relative">
       <div
-        className={`transition-all duration-300 ease-out ${
-          isFullscreen
-            ? 'fixed inset-0 z-50 rounded-none border-none bg-slate-950 shadow-none'
-            : 'relative w-full h-[620px] rounded-xl border border-slate-800 bg-slate-950/90 shadow-2xl overflow-hidden'
-        }`}
+        className={`transition-all duration-300 ease-out ${isFullscreen
+          ? 'fixed inset-0 z-50 rounded-none border-none shadow-none'
+          : 'relative w-full h-[620px] rounded-xl border border-slate-800 shadow-2xl overflow-hidden'
+          }`}
+        style={{
+          background: `
+      linear-gradient(
+        to bottom,
+        #123452 0%,
+      #1d5274 25%,
+      #347596 50%,
+      #6699ae 75%,
+      #9ab8c5 100%
+      )
+    `
+        }}
       >
-        {/* 3D WebGL Canvas Container */}
-        <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
+        {/* Subtle Sky Clouds */}
+        {/* Subtle High-Altitude Clouds */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+
+          <div
+            className="absolute w-64 h-20 rounded-full bg-white/15 blur-2xl"
+            style={{ top: '15%', left: '8%' }}
+          />
+
+          <div
+            className="absolute w-80 h-24 rounded-full bg-white/10 blur-3xl"
+            style={{ top: '28%', right: '5%' }}
+          />
+
+          <div
+            className="absolute w-72 h-20 rounded-full bg-white/12 blur-2xl"
+            style={{ top: '50%', left: '55%' }}
+          />
+
+          <div
+            className="absolute w-96 h-24 rounded-full bg-white/08 blur-3xl"
+            style={{ top: '68%', left: '-8%' }}
+          />
+
+        </div>
+
+        {/* 3D WebGL Canvas Container */}
+        <div
+          ref={containerRef}
+          className="relative z-[1] w-full h-full cursor-grab active:cursor-grabbing"
+        />
         {/* SVG AVIONICS LEADER LINES OVERLAY (High-Performance Direct DOM updates) */}
         {showHotspots && (
           <svg ref={svgRef} className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
@@ -703,11 +757,10 @@ export const AeroPistonEngine3D: React.FC = () => {
           <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
             <button
               onClick={() => setViewMode('REALISTIC')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                viewMode === 'REALISTIC'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${viewMode === 'REALISTIC'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
             >
               <Box className="w-3.5 h-3.5" />
               1:1 Real Drone
@@ -715,11 +768,10 @@ export const AeroPistonEngine3D: React.FC = () => {
 
             <button
               onClick={() => setViewMode('EXPLODED')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                viewMode === 'EXPLODED'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${viewMode === 'EXPLODED'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20 font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
             >
               <Layers className="w-3.5 h-3.5" />
               Exploded
@@ -727,11 +779,10 @@ export const AeroPistonEngine3D: React.FC = () => {
 
             <button
               onClick={() => setViewMode('THERMAL')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                viewMode === 'THERMAL'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${viewMode === 'THERMAL'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20 font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
             >
               <Flame className="w-3.5 h-3.5 text-amber-400" />
               Thermal Heat
@@ -739,11 +790,10 @@ export const AeroPistonEngine3D: React.FC = () => {
 
             <button
               onClick={() => setViewMode('XRAY')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                viewMode === 'XRAY'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${viewMode === 'XRAY'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20 font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
             >
               <Eye className="w-3.5 h-3.5 text-emerald-400" />
               Engine Cutaway
@@ -751,11 +801,10 @@ export const AeroPistonEngine3D: React.FC = () => {
 
             <button
               onClick={() => setViewMode('WIREFRAME')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                viewMode === 'WIREFRAME'
-                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm shadow-blue-500/20 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all ${viewMode === 'WIREFRAME'
+                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm shadow-blue-500/20 font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
             >
               <Zap className="w-3.5 h-3.5 text-blue-400" />
               Hologram
@@ -831,25 +880,22 @@ export const AeroPistonEngine3D: React.FC = () => {
               <span className="text-slate-400">Hotspots:</span>
               <button
                 onClick={() => setHotspotFilter('ALL')}
-                className={`px-2 py-1 text-[11px] rounded transition-all ${
-                  hotspotFilter === 'ALL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-                }`}
+                className={`px-2 py-1 text-[11px] rounded transition-all ${hotspotFilter === 'ALL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
               >
                 All Metrics
               </button>
               <button
                 onClick={() => setHotspotFilter('CRITICAL')}
-                className={`px-2 py-1 text-[11px] rounded transition-all ${
-                  hotspotFilter === 'CRITICAL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-                }`}
+                className={`px-2 py-1 text-[11px] rounded transition-all ${hotspotFilter === 'CRITICAL' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
               >
                 Critical 4
               </button>
               <button
                 onClick={() => setHotspotFilter('ALERTS_ONLY')}
-                className={`px-2 py-1 text-[11px] rounded transition-all ${
-                  hotspotFilter === 'ALERTS_ONLY' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
-                }`}
+                className={`px-2 py-1 text-[11px] rounded transition-all ${hotspotFilter === 'ALERTS_ONLY' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
               >
                 Alerts Only
               </button>
@@ -860,11 +906,10 @@ export const AeroPistonEngine3D: React.FC = () => {
             {/* Auto Rotation Toggle */}
             <button
               onClick={() => setAutoRotate(!autoRotate)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
-                autoRotate
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                  : 'text-slate-400 hover:bg-slate-800'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${autoRotate
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                : 'text-slate-400 hover:bg-slate-800'
+                }`}
             >
               {autoRotate ? <Pause className="w-3.5 h-3.5 text-emerald-400" /> : <Play className="w-3.5 h-3.5" />}
               Auto Orbit
@@ -873,11 +918,10 @@ export const AeroPistonEngine3D: React.FC = () => {
             {/* Hotspots Toggle */}
             <button
               onClick={() => setShowHotspots(!showHotspots)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${
-                showHotspots
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                  : 'text-slate-400 hover:bg-slate-800'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono transition-all ${showHotspots
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                : 'text-slate-400 hover:bg-slate-800'
+                }`}
             >
               <Activity className="w-3.5 h-3.5 text-cyan-400" />
               {showHotspots ? 'HUD On' : 'HUD Off'}
