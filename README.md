@@ -859,9 +859,9 @@ ALL 5 MICROSERVICES & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!
 
 ## 👥 Contributors & Acknowledgments
 
-Developed for the **Smart India Hackathon (SIH 2026)** — Problem Statement **SIH-26**.
+Developed for the **Smart India Hackathon (SIH 2026)** - Problem Statement **SIH26054**.
 
-- **Team**: Aero Digital Twin Research & Development Team
+- **Team**: Innovexa
 - **Target Platform**: MALE UAV (Medium-Altitude Long-Endurance) Piston Aero Propulsion Systems (e.g., TAPAS-BH-201)
 - **Tech Stack**: Python 3.10+, FastAPI, XGBoost, SHAP, scikit-learn, python-can, cantools, MongoDB Atlas, Motor, WebSockets
 
