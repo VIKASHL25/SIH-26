@@ -1,5 +1,12 @@
-# 🚀 MALE UAV Aero Piston Engine Digital Twin Framework
-### *Next-Generation Physics-Informed Predictive Health Monitoring, Real-Time AI/ML Diagnostics, Explainable AI (XAI), CAN Telemetry & MongoDB Atlas Persistence*
+<p align="center">
+  <img src="frontend/public/garud-logo.png" width="180" alt="Project GARUD Emblem" />
+</p>
+
+# 🦅 PROJECT GARUD
+## *AI-Enabled Digital Twin System for Aero-Engine Health Monitoring, Fault Prediction and Mission Reliability*
+### **DRDO Problem Statement: PS-26054 / SIH 2026**
+
+> **Target Platform**: DRDO TAPAS-BH-201 (Rustom-II) MALE UAV // Rotax 914 Turbocharged Aero Piston Engine (115 HP)
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -119,9 +126,9 @@ Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/). The API Gateway is at
 
 ## 📌 Executive Summary
 
-Medium-Altitude Long-Endurance (MALE) Unmanned Aerial Vehicles (UAVs)—such as the **TAPAS-BH-201** class—perform mission-critical Intelligence, Surveillance, Target Acquisition, and Reconnaissance (ISTAR) sorties requiring uninterrupted powertrain reliability. In-flight piston engine failures present catastrophic operational and mission risks.
+Medium-Altitude Long-Endurance (MALE) Unmanned Aerial Vehicles (UAVs)—such as the **DRDO TAPAS-BH-201** class—perform mission-critical Intelligence, Surveillance, Target Acquisition, and Reconnaissance (ISTAR) sorties requiring uninterrupted propulsion powertrain reliability. In-flight aero piston engine failures present catastrophic operational and mission risks.
 
-The **MALE UAV Aero Piston Engine Digital Twin Framework** provides a real-time, physics-informed, AI-powered health monitoring and predictive maintenance ecosystem. It models thermodynamic engine behavior, processes high-frequency engine sensor telemetry through standardized CAN bus protocols, runs four synchronized machine learning inference models, attributes root causes using Explainable AI (SHAP & Counterfactual Sensitivity), and streams live mission health metrics to Ground Control Station (GCS) dashboards while archiving complete mission trajectories to MongoDB Atlas.
+**Project GARUD** (*AI-Enabled Digital Twin System for Aero-Engine Health Monitoring, Fault Prediction and Mission Reliability*) delivers a defense-grade, physics-informed, AI-driven predictive health monitoring and prognostic digital twin ecosystem. It models thermodynamic engine behavior, processes high-frequency engine sensor telemetry through standardized CAN-FD bus protocols, executes synchronized machine learning inference models, attributes root causes using Explainable AI (Tree-SHAP & Counterfactual Sensitivity), and streams live mission health metrics to Ground Control Station (GCS) dashboards with Three.js 3D twin visualization while archiving complete mission trajectories to MongoDB Atlas.
 
 ---
 
@@ -129,8 +136,9 @@ The **MALE UAV Aero Piston Engine Digital Twin Framework** provides a real-time,
 
 All project documentation, benchmarks, security policies, and technical roadmaps are consolidated in the [`docs/`](docs/) directory:
 
+- **[AI/ML Model Performance Metrics Infographic](docs/model_metrics_summary.png)**: High-resolution evaluation dashboard covering XGBoost RUL, Multiclass Fault Classification, Anomaly Detection, and MICE Imputation.
 - **[Engine Architecture & Physics Model](docs/ENGINE_ARCHITECTURE.md)**: High-fidelity mathematical plant schematic, multi-cylinder heat partitioning, lubrication, and CAN bus signal mappings.
-- **[MATLAB / Simulink Integration Guide](docs/SIMULINK_INTEGRATION_GUIDE.md)**: Current recorded-mission replay path, 1-second fixed-step UDP output, and the UDP→CAN-FD live dashboard bridge. Legacy plant-generation notes are marked as historical in that guide.
+- **[MATLAB / Simulink Integration Guide](docs/SIMULINK_INTEGRATION_GUIDE.md)**: Current recorded-mission replay path, 1-second fixed-step UDP output, and the UDP→CAN-FD live dashboard bridge.
 - **[Security Architecture & Policy](docs/SECURITY.md)**: 5-layer Defense-in-Depth security framework, inter-service authentication, and model SHA-256 fingerprinting.
 - **[Edge AI Benchmarking Report](docs/EDGE_AI_BENCHMARK.md)**: Model artifact sizes (KB), CPU single-core latency (ms), and Onboard vs. GCS split architecture.
 - **[Federated Learning (FedAvg) PoC](docs/FEDERATED_LEARNING.md)**: Multi-UAV fleet parameter weight averaging and zero telemetry sharing privacy proof.
@@ -317,12 +325,18 @@ Recorded Mission CSV → MATLAB / Simulink → UDP → udp_can_bridge.py
 
 All machine learning models operate as **frozen inference engines** to ensure zero runtime drift and deterministic execution during flight monitoring.
 
-| Model | Target Metric | Algorithm | Input Shape | Primary Output Parameters |
+<p align="center">
+  <img src="docs/model_metrics_summary.png" width="95%" alt="Project GARUD Model Metrics Summary" />
+</p>
+
+### 📊 Model Architecture & Evaluated Performance Benchmarks
+
+| Subsystem / Model | Algorithm & Architecture | Key Evaluated Performance Metrics | Features & Input | Operational Role |
 | :--- | :--- | :--- | :---: | :--- |
-| **Model 1: Anomaly Detection** | Operational Outliers | **Isolation Forest** + `StandardScaler` | $13$ Features | `anomaly_score`, `is_anomaly` (bool), `decision_function` |
-| **Model 2: Degradation Estimation** | Engine Wear Index | **XGBoost Regressor** | $120$ Features | `degradation_index` ($0.0 - 1.0$), `estimated_health_pct` ($0\% - 100\%$) |
-| **Model 3: Fault Classification** | Specific Failure Mode | **Multiclass XGBoost Classifier** + `LabelEncoder` | $55$ Features | `predicted_fault`, `confidence`, `fault_probabilities` |
-| **Model 4: RUL Prediction** | Remaining Useful Life | **XGBoost Regressor** + Dynamic Post-Processing | $60$ Features | `predicted_rul_hours`, `rul_lower_bound_p10`, `rul_upper_bound_p90`, `uncertainty_std_hours` |
+| **Model 1: Anomaly Detection** | **Unsupervised PCA / Autoencoder Reconstruction** | • **ROC-AUC**: `0.9943 (99.4%)`<br>• **Recall**: `98.21 %`<br>• **Precision**: `85.90 %`<br>• **Latency**: `2.4 timesteps (0.24s)` | $51$ Features | Early detection of sub-threshold thermodynamic drift before critical thresholds. |
+| **Model 2: Multiclass Fault Classifier** | **Multiclass XGBoost Classifier** | • **Accuracy**: `99.95 %`<br>• **Macro F1**: `0.9990`<br>• **Macro ROC-AUC (OvR)**: `1.0000`<br>• **Lubrication F1**: `1.0000`, **Injector F1**: `0.9985` | $55$ Features | Deterministic root-cause fault diagnosis across 6 failure modes. |
+| **Model 3: Prognostic RUL Predictor** | **XGBoost Regressor + Slew Filter** | • **Overall MAE**: `26.72 Hours`<br>• **Late-Life Critical MAE (<50h)**: `15.33 Hours`<br>• **$R^2$ Score**: `0.7369` (0.74)<br>• **RMSE**: `37.26 Hours` | $60$ Features | Continuous Remaining Useful Life estimation with 90% confidence intervals. |
+| **Model 4: Explainability & Recovery** | **Tree-SHAP + Bayesian MICE Imputation** | • **Packet Loss Recovery**: `98.6 %`<br>• **SHAP Latency**: `< 3.5 ms / frame`<br>• **End-to-End Pipeline**: `< 8.2 ms total` | 20+ Sensors | Physics-informed Shapley attribution & sensor dropout fault-tolerance. |
 
 ### RUL Post-Processing & Uncertainty Quantification
 
@@ -859,11 +873,12 @@ ALL 5 MICROSERVICES & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!
 
 ## 👥 Contributors & Acknowledgments
 
-Developed for the **Smart India Hackathon (SIH 2026)** - Problem Statement **SIH26054**.
+Developed for the **Smart India Hackathon (SIH 2026)** — **DRDO Problem Statement PS-26054 / SIH26054**.
 
-- **Team**: Innovexa
-- **Target Platform**: MALE UAV (Medium-Altitude Long-Endurance) Piston Aero Propulsion Systems (e.g., TAPAS-BH-201)
-- **Tech Stack**: Python 3.10+, FastAPI, XGBoost, SHAP, scikit-learn, python-can, cantools, MongoDB Atlas, Motor, WebSockets
+- **Project**: **PROJECT GARUD** (*AI-Enabled Digital Twin System for Aero-Engine Health Monitoring, Fault Prediction and Mission Reliability*)
+- **Team**: **Innovexa**
+- **Target Platform**: DRDO TAPAS-BH-201 (Rustom-II) MALE UAV // Rotax 914 Turbocharged Aero Piston Engine (115 HP)
+- **Tech Stack**: Python 3.10+, FastAPI, XGBoost, SHAP, PyTorch, React, Three.js, Tailwind CSS, python-can, cantools, MongoDB Atlas, Motor, WebSockets
 
 ---
 
