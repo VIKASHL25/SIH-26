@@ -16,7 +16,6 @@ import {
   Play,
   Pause,
   Sliders,
-  Plane,
   ShieldAlert,
   Wind,
   Navigation,
@@ -42,25 +41,6 @@ const HOTSPOT_COMPONENTS: HotspotConfig[] = [
   { id: 'crankcase', name: 'Oil System & Crankcase', sensorKey: 'oil_pressure' },
   { id: 'exhaust_manifold', name: 'Exhaust Header & Collector', sensorKey: 'egt1' },
 ];
-
-// Procedural Atmospheric Sky Environment Map (18,500 FT Stratosphere to Horizon Rayleigh Glow)
-function createAtmosphericSkyTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
-
-  const grad = ctx.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0.0, '#0a1a2f'); // Stratosphere Zenith
-  grad.addColorStop(0.3, '#152d4d'); // Upper flight corridor
-  grad.addColorStop(0.6, '#284b6f'); // Mid flight level (18,500 ft)
-  grad.addColorStop(0.85, '#4f7599'); // Atmospheric horizon Rayleigh glow
-  grad.addColorStop(1.0, '#1c2e42'); // Earth/Cloud under-deck
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 512);
-
-  return new THREE.CanvasTexture(canvas);
-}
 
 export const AeroPistonEngine3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -720,13 +700,16 @@ export const AeroPistonEngine3D: React.FC = () => {
 
         {/* Top Header Avionics HUD */}
         <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none z-20">
-          <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
-            <div className="w-3 h-3 rounded-full bg-cyan-400 animate-ping" />
+          <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-3.5 py-2 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
+            <img
+              src="/garud-logo.png"
+              alt="GARUD"
+              className="w-7 h-7 rounded-full object-cover border border-amber-500/50 shadow-glow-amber bg-slate-950 flex-shrink-0"
+            />
             <div>
               <div className="flex items-center gap-2">
-                <Plane className="w-4 h-4 text-cyan-400" />
-                <h3 className="font-mono text-xs font-bold text-cyan-400 tracking-wider uppercase">
-                  MALE UAV PROPULSION DIGITAL TWIN (N190TC)
+                <h3 className="font-mono text-xs font-bold text-amber-300 tracking-wider uppercase flex items-center gap-1.5">
+                  GARUD <span className="text-slate-500">//</span> <span className="text-cyan-400">PROPULSION TWIN (TAPAS-BH-201)</span>
                 </h3>
 
                 {/* Real-Time Nominal vs Anomaly Status Badge */}
