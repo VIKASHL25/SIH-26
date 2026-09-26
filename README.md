@@ -859,9 +859,9 @@ ALL 5 MICROSERVICES & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!
 
 ## 👥 Contributors & Acknowledgments
 
-Developed for the **Smart India Hackathon (SIH 2026)** — Problem Statement **SIH-26**.
+Developed for the **Smart India Hackathon (SIH 2026)** - Problem Statement **SIH26054**.
 
-- **Team**: Aero Digital Twin Research & Development Team
+- **Team**: Innovexa
 - **Target Platform**: MALE UAV (Medium-Altitude Long-Endurance) Piston Aero Propulsion Systems (e.g., TAPAS-BH-201)
 - **Tech Stack**: Python 3.10+, FastAPI, XGBoost, SHAP, scikit-learn, python-can, cantools, MongoDB Atlas, Motor, WebSockets
 
@@ -870,3 +870,254 @@ Developed for the **Smart India Hackathon (SIH 2026)** — Problem Statement **S
 ## 📄 License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🔄 Appended Implementation Documentation & Model Benchmarks
+
+> [!NOTE] Extension Architecture
+> The documentation below details the expanded runtime implementation, MATLAB/Simulink real-time telemetry replay integration, CAN-FD multicast transport, RUL post-processing mechanisms, model evaluation metrics, and verification test additions built upon the baseline Digital Twin architecture described above.
+
+---
+
+## 🔀 Current Verified Live Pipeline
+
+```text
+Recorded Mission CSV
+        ↓
+MATLAB / Simulink (1-second fixed step replay)
+        ↓ UDP telemetry (127.0.0.1:5005)
+udp_can_bridge.py
+        ↓ CAN-FD multicast (channel: ff15:7079:7468:6f6e:6465:6d6f:6d63:6173, port: 43113)
+CANInputReceiver (backend/can_receiver.py)
+        ↓
+Existing Digital Twin Backend (backend/simulation_engine.py)
+        ↓
+Physics-Informed Feature Engineering (backend/feature_engine.py)
+        ↓
+Machine Learning Models (Anomaly / Degradation / Fault Classification)
+        ↓
+Remaining Useful Life (RUL) Prediction & Dynamic Anchoring
+        ↓
+XAI & Diagnostic Advisory Layer (explainability/xai_engine.py)
+        ↓
+API Gateway Service (Port 8000)
+        ↓ WebSocket (ws://127.0.0.1:8000/ws/telemetry)
+Ground Control Station Live Dashboard (frontend/)
+```
+
+> [!IMPORTANT] Replay Telemetry Source Notice
+> The MATLAB / Simulink telemetry layer operates strictly as a **recorded-mission telemetry replay / real-time replay source** for live system demonstration. It streams pre-recorded mission telemetry at fixed 1-second ticks. **This setup does not claim or connect to a physical UAV engine.**
+
+---
+
+## 🛈 MATLAB / Simulink Telemetry Replay Subsystem
+
+### 1. Telemetry Generation & Solver Configuration
+- **Model Artifact**: [`simulink/simulink_udp_poc.slx`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/simulink_udp_poc.slx)
+- **Solver Settings**: Configured with a **Fixed-Step 1-second solver** (`Fixed-step size = 1 s`). This ensures exact 1:1 temporal alignment between original dataset CSV rows and emitted UDP telemetry frames, preventing inter-sample interpolation artifacts.
+- **Mission Selector**: [`simulink/run_mission.m`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/run_mission.m) accepts `mission_id` (`1`–`100`) and `stop_time` (default `1000` seconds), reading from mission CSV logs in `data/` and populating the `telemetry_ts` timeseries structure.
+
+### 2. Live Replay vs. Historical Mission Scope
+- **Missions 1–100 (Live Replay Mode)**: Supported for real-time streaming through MATLAB/Simulink and the UDP→CAN-FD bridge.
+- **Mission 999 (Historical / Demo-Only Mode)**: Represents an out-of-sample synthetic flight test dataset ([`data/demo_synthetic_flight_test.csv`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/data/demo_synthetic_flight_test.csv)). Mission 999 is reserved for direct backend/historical playback and explicitly bypasses external MATLAB process spawning.
+
+### 3. SimulinkController Process Management
+The [`backend/simulink_controller.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/backend/simulink_controller.py) module manages external MATLAB process lifecycles with decoupled mission selection and start/stop controls:
+- **`select_mission(mission_id)`**: Prepares Mission `1`–`100` and sets state to `PAUSED` without launching MATLAB. If a previous Simulink simulation is active, it automatically terminates it first.
+- **`start()`**: Triggered by user action (`STREAM LIVE`). Spawns `matlab -batch "cd('...'); run_mission(id, stop_time)"` as an asynchronous subprocess.
+- **`stop()`**: Triggered by user action (`PAUSE` or `STOP`). Terminates the active MATLAB process via OS process termination (`taskkill /F` on Windows, `terminate()` on POSIX). Note that pause action terminates the process rather than freezing simulation time.
+
+---
+
+## 📡 UDP → CAN-FD Multicast Transport & Backend Ingestion
+
+### 1. UDP Telemetry Egress
+Simulink broadcasts 20 raw sensor signals as 20 double-precision IEEE 754 floating point numbers (160 bytes total payload) over UDP:
+- **Host**: `127.0.0.1`
+- **Port**: `5005`
+- **Signals**: `rpm`, `throttle_pct`, `load_pct`, `cht_C`, `egt_C`, `oil_temperature_C`, `oil_pressure_bar`, `air_mass_flow_kg_s`, `fuel_flow_kg_s`, `torque_Nm`, `power_W`, `vibration_rms`, `battery_voltage_V`, `alternator_current_A`, `alternator_health`, `altitude_m`, `ambient_temp_C`, `pressure_kPa`, `injection_timing_deg`, `air_density_kg_m3`.
+
+### 2. UDP → CAN-FD Multicast Bridge
+The persistent bridge [`simulink/udp_can_bridge.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/udp_can_bridge.py) ingests UDP packets from port 5005, encodes the signals using the CAN DBC specification ([`can_layer/engine_can.dbc`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/can_layer/engine_can.dbc)), and transmits 8 CAN-FD frames across multicast transport:
+- **Multicast Group**: `ff15:7079:7468:6f6e:6465:6d6f:6d63:6173`
+- **Multicast Port**: `43113`
+- **Frame Format**: Transmitted as CAN-FD because encoded payload size per message is **9 bytes** (8 signal bytes + 1 checksum byte), exceeding classic CAN 2.0B 8-byte limits.
+
+### 3. Backend Receiver & Downstream Pipeline Preservation
+- **`CANInputReceiver`**: Implemented in [`backend/can_receiver.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/backend/can_receiver.py) to listen on the CAN-FD multicast bus, assemble all 8 message IDs (`0x100`–`0x107`), and reconstruct the 20 telemetry signals.
+- **Pipeline Intact downstream of CAN**: Ingested signals feed into [`backend/simulation_engine.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/backend/simulation_engine.py) (`input_mode="simulink"`). The downstream [`backend/feature_engine.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/backend/feature_engine.py), frozen ML models ([`backend/model_loader.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/backend/model_loader.py)), XAI explainer, and MongoDB persistence operate completely unchanged.
+
+---
+
+## 🔮 RUL Evaluation & Advanced Post-Processing Pipeline
+
+The Remaining Useful Life (RUL) predictor combines XGBoost regression with physical lifecycle constraints and statistical smoothing:
+
+1. **Historical Warm-Up Buffer**: Requires a 13-frame temporal window. During initial frames, status reports `COLLECTING_HISTORY` with `predicted_rul_hours = null`. Upon accumulating 13 frames, status transitions to `PREDICTED`.
+2. **Failure-State Physical Anchoring**:
+   - If wear index $\ge 0.98$, RUL is clamped to $0.0\,\text{hours}$.
+   - For intermediate wear, raw ML outputs are anchored against physical lifecycle targets:
+     $$\text{RUL}_{\text{target}} = \left(\frac{\text{Health}\%}{100}\right) \times 50.0\,\text{hrs}$$
+     $$\text{RUL}_{\text{anchored}} = 0.3 \times \text{RUL}_{\text{raw}} + 0.7 \times \text{RUL}_{\text{target}}$$
+3. **Monotonic Filtering & Slew-Rate Limits**: Low-pass Exponential Moving Average ($\alpha = 0.12$) and slew-rate caps ($+0.5\,\text{h}$ max climb, $-2.0\,\text{h}$ max descent per tick) remove transient noise and enforce monotonic behavior.
+4. **Uncertainty Bounds ($P_{10} - P_{90}$ 90% CI)**: Evaluates predictions across 10 boosting sub-ensemble checkpoints to calculate prediction variance $\sigma$, rendering lower ($P_{10}$) and upper ($P_{90}$) confidence limits.
+
+---
+
+## 📊 Model Evaluation Metrics
+
+All model metrics documented below reflect actual, empirical evaluation evidence extracted from repository evaluation scripts ([`models/rul_prediction/inference/evaluate_rul_metrics.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/rul_prediction/inference/evaluate_rul_metrics.py)), manifests ([`models/anomaly_detection/anomaly_detection_manifest.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/anomaly_detection_manifest.json), [`models/fault_detection/fault_detection_model_manifest.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/fault_detection/fault_detection_model_manifest.json)), documentation reports ([`models/degradation_detection/README.md`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/degradation_detection/README.md), [`docs/rul_evaluation_report.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/rul_evaluation_report.json)), and benchmarking logs ([`docs/EDGE_AI_BENCHMARK.md`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/EDGE_AI_BENCHMARK.md)).
+
+### 1. Summary of Implemented Model Metrics
+
+| Model | Primary Metric | Primary Result | Evaluation Dataset Scope | Evaluation Source |
+| :--- | :--- | :---: | :--- | :--- |
+| **Model 1: Anomaly Detection** | Test ROC-AUC / Recall | `0.9943` / `0.9821` | 7 Fault-Injected Missions (100k samples) | [`anomaly_detection_manifest.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/anomaly_detection_manifest.json) |
+| **Model 2: Degradation Estimation** | Test MAE / R² | `0.00141` / `0.99963` | 21 Held-Out Test Missions (21k samples) | [`degradation_detection/README.md`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/degradation_detection/README.md) |
+| **Model 3: Fault Classification** | Test Accuracy / Macro F1 | `0.99952` / `0.99903` | 21 Held-Out Test Missions (21k samples) | [`fault_detection_model_manifest.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/fault_detection/fault_detection_model_manifest.json) |
+| **Model 4: RUL Prediction** | Test MAE / RMSE | `26.72h` / `37.26h` | 24,435 Out-of-Sample Test Samples | [`docs/rul_evaluation_report.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/rul_evaluation_report.json) |
+
+---
+
+### 2. Model 1: Anomaly Detection (PCA Reconstruction Error)
+
+- **Algorithm**: PCA Reconstruction Error (10 principal components across 51 features, 95th percentile anomaly threshold = `19.528`). Baseline Isolation Forest model artifact ([`models/anomaly_detection/isolation_forest_model.pkl`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/isolation_forest_model.pkl)) is also preserved.
+- **Evaluation Source**: [`models/anomaly_detection/anomaly_detection_manifest.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/anomaly_detection_manifest.json)
+- **Evaluation Scope**: 100,000 telemetry samples across 100 missions (7 fault-injected evaluation missions).
+
+| Metric | Result | Context / Details |
+| :--- | :---: | :--- |
+| **Test ROC-AUC** | `0.9943` | Evaluated across held-out fault missions |
+| **Test Precision (at 95th %ile threshold)** | `0.8590` (85.90%) | Threshold calibrated on nominal training rows |
+| **Test Recall (at 95th %ile threshold)** | `0.9821` (98.21%) | High sensitivity to physical parameter anomalies |
+| **Calculated F1-Score** | `0.9164` (91.64%) | Harmonic mean of precision and recall |
+| **Mean Detection Latency** | `2.43 timesteps` | Average timesteps from anomaly onset to detection |
+| **Explained Variance Ratio** | `0.7689` (76.89%) | 10 PCA components explained variance |
+| **PR-AUC / Detailed FPR Curves** | — | *Not currently reported in the repository.* |
+
+---
+
+### 3. Model 2: Degradation Estimation (XGBoost Regressor)
+
+- **Algorithm**: XGBoost Regressor (120 features: 10 base physical signals, physics residuals, 4 operating condition ratios, and 90 causal temporal features).
+- **Evaluation Source**: [`models/degradation_detection/README.md`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/degradation_detection/README.md)
+- **Evaluation Scope**: 21 completely held-out test missions (21,000 samples) out of 100 missions (58 train / 21 val / 21 test split).
+
+| Benchmark Scope | Metric | Result | Notes |
+| :--- | :--- | :---: | :--- |
+| **Batch Test Set** | MAE | `0.00141` | Held-out 21 test missions |
+| **Batch Test Set** | RMSE | `0.00525` | Held-out 21 test missions |
+| **Batch Test Set** | R² Score | `0.99963` | Held-out 21 test missions |
+| **Batch Test Set** | Median Absolute Error | `0.00003` | Held-out 21 test missions |
+| **Batch Test Set** | Maximum Absolute Error | `0.15502` | Largest single-frame prediction deviation |
+| **Real-Time Replay Benchmark** | MAE | `0.001407` | Sequential 1-by-1 telemetry replay |
+| **Real-Time Replay Benchmark** | RMSE | `0.005255` | Sequential 1-by-1 telemetry replay |
+| **Real-Time Replay Benchmark** | R² Score | `0.999626` | Sequential 1-by-1 telemetry replay |
+| **Real-Time Replay Benchmark** | Median Absolute Error | `0.000032` | Sequential 1-by-1 telemetry replay |
+| **Real-Time Replay Benchmark** | Maximum Absolute Error | `0.155019` | Sequential 1-by-1 telemetry replay |
+| **Batch-to-Replay Parity** | Max Prediction Delta | `1.11 × 10⁻¹⁶` | Floating-point numerical precision match |
+
+---
+
+### 4. Model 3: Multiclass Fault Classification (XGBoost Classifier)
+
+- **Algorithm**: Multiclass XGBoost Classifier + `LabelEncoder` (55 features, 6 fault categories).
+- **Evaluation Source**: [`models/fault_detection/fault_detection_model_manifest.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/fault_detection/fault_detection_model_manifest.json)
+- **Evaluation Scope**: 21 held-out test missions (21,000 test samples).
+
+| Metric | Overall Test Result | Cross-Validation Benchmark | Evaluation Source |
+| :--- | :---: | :---: | :--- |
+| **Accuracy** | `0.99952` (99.95%) | — | `fault_detection_model_manifest.json` |
+| **Macro Precision** | `0.99955` (99.95%) | — | Held-out 21 test missions |
+| **Macro Recall** | `0.99851` (99.85%) | — | Held-out 21 test missions |
+| **Macro F1-Score** | `0.99903` (99.90%) | `0.9984` | 5-Fold CV Best Macro F1 |
+| **Weighted F1-Score** | `0.99952` (99.95%) | — | Held-out 21 test missions |
+| **Macro ROC-AUC (OvR)** | `1.0000` | — | One-vs-Rest Multiclass ROC-AUC |
+
+#### Per-Class Metrics
+
+| Fault Class | Precision | Recall | F1-Score | Test Support |
+| :--- | :---: | :---: | :---: | :---: |
+| **Normal Operation** | `0.9996` | `0.9998` | `0.9997` | 15,401 |
+| **Lubrication Degradation** | `1.0000` | `1.0000` | `1.0000` | 1,708 |
+| **Injector Degradation** | `0.9977` | `0.9994` | `0.9985` | 1,708 |
+| **Overheating** | `1.0000` | `0.9963` | `0.9981` | 807 |
+| **Misfire** | `1.0000` | `0.9986` | `0.9993` | 712 |
+| **Sensor Fault** | `1.0000` | `0.9970` | `0.9985` | 664 |
+
+#### Confusion Matrix (21,000 Test Samples)
+
+| True Class \ Predicted Class | Injector | Lubrication | Misfire | Normal | Overheating | Sensor Fault |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Injector Degradation** | **1707** | 0 | 0 | 1 | 0 | 0 |
+| **Lubrication Degradation** | 0 | **1708** | 0 | 0 | 0 | 0 |
+| **Misfire** | 1 | 0 | **711** | 0 | 0 | 0 |
+| **Normal Operation** | 3 | 0 | 0 | **15398** | 0 | 0 |
+| **Overheating** | 0 | 0 | 0 | 3 | **804** | 0 |
+| **Sensor Fault** | 0 | 0 | 0 | 2 | 0 | **662** |
+
+---
+
+### 5. Model 4: Remaining Useful Life (RUL) Prediction (XGBoost Regressor)
+
+- **Algorithm**: XGBoost Regressor (60 features) + Dynamic Physical Anchoring + EMA Smoothing ($\alpha=0.12$) + Sub-Ensemble Variance ($P_{10}-P_{90}$ 90% CI).
+- **Evaluation Source**: [`docs/rul_evaluation_report.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/rul_evaluation_report.json) & [`models/rul_prediction/inference/evaluate_rul_metrics.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/rul_prediction/inference/evaluate_rul_metrics.py)
+- **Evaluation Scope**: 24,435 out-of-sample test samples.
+
+#### Overall & Validation Metrics
+
+| Metric | Validation Set (`val_df`) | Overall Test Set (`test_df`) | Evaluation Source |
+| :--- | :---: | :---: | :--- |
+| **MAE (Hours)** | `17.84h` | `26.72h` | `docs/rul_evaluation_report.json` |
+| **RMSE (Hours)** | `28.12h` | `37.26h` | `docs/rul_evaluation_report.json` |
+| **R² Score** | `0.8540` | `0.7369` | `docs/rul_evaluation_report.json` |
+| **MAPE (%)** | — | `52.04%` | Non-zero true RUL (>1h) |
+| **Mean Error (Hours)** | — | `4.48h` | Prediction bias |
+| **Median (P50) Error** | — | `4.64h` | Median error |
+| **P25 / P75 Error Bounds** | — | `-14.34h` / `+20.28h` | Interquartile error spread |
+
+#### RUL Accuracy by Lifecycle Phase
+
+| Lifecycle Phase | Flight Hours Scope | MAE (Hours) | RMSE (Hours) | R² Score | Test Samples |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Early Life** | $> 200\,\text{hours}$ | `50.05h` | `57.41h` | `-2.3699` | 2,933 |
+| **Mid Life** | $50 - 200\,\text{hours}$ | `27.44h` | `37.65h` | `0.2041` | 14,579 |
+| **Late Life (Critical)** | $< 50\,\text{hours}$ | `15.33h` | `22.79h` | `-1.4777` | 6,923 |
+
+#### RUL Accuracy by Fault / Degradation Mode
+
+| Fault Mode | MAE (Hours) | RMSE (Hours) | R² Score | Test Samples |
+| :--- | :---: | :---: | :---: | :---: |
+| **Misfire** | `19.90h` | `28.39h` | `0.8534` | 5,293 |
+| **Normal Wear** | `22.97h` | `38.67h` | `0.6252` | 3,613 |
+| **Lubrication Degradation** | `25.72h` | `32.47h` | `0.7999` | 6,504 |
+| **Vibration Wear** | `26.94h` | `39.67h` | `0.7672` | 4,560 |
+| **Overheating** | `37.17h` | `45.64h` | `0.1876` | 3,243 |
+| **Injector Degradation** | `44.18h` | `53.25h` | `-1.3543` | 1,222 |
+
+---
+
+### 6. Edge AI Benchmarking & Latency Allocation
+
+- **Source**: [`docs/EDGE_AI_BENCHMARK.md`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/EDGE_AI_BENCHMARK.md)
+
+| Model Component | Artifact Size | Input Shape | CPU Latency (ms/sample) | Target Allocation |
+| :--- | :---: | :---: | :---: | :--- |
+| **1. Anomaly Detection (Isolation Forest)** | `5,739.6 KB` | 13 | `41.679 ms` | Ground Control Station (GCS) |
+| **2. Degradation Estimation (XGBoost)** | `9,362.5 KB` | 120 | `1.922 ms` | Onboard Edge Flight Computer (<2ms) |
+| **3. Fault Classification (XGBoost)** | `1,707.7 KB` | 55 | `9.134 ms` | Ground Control Station (GCS) |
+| **4. RUL Prediction (XGBoost)** | `9,010.8 KB` | 60 | `10.875 ms` | Ground Control Station (GCS) |
+| **FULL 4-MODEL PIPELINE TOTAL** | `25,820.5 KB` | — | `63.610 ms` | Periodic / Batch Processing |
+
+---
+
+## 🧪 Verification & Test Suite Extensions
+
+1. **End-to-End Microservices Test Suite**: [`backend/verify_microservices.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/backend/verify_microservices.py) validates all 5 HTTP microservices, mission loading, step execution, fault injection, and MongoDB persistence.
+2. **Simulink & CAN-FD Multicast Test Utilities**:
+   - [`simulink/test_udp_multicast_can.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/test_udp_multicast_can.py): Tests UDP telemetry ingestion and conversion into 8 CAN-FD multicast frames.
+   - [`simulink/test_can_receiver.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/test_can_receiver.py): Validates `CANInputReceiver` multicast frame decoding and 20-signal reconstruction.
+   - [`simulink/test_external_can_receiver.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/test_external_can_receiver.py): Validates decoupled external CAN traffic monitoring.
+3. **RUL Evaluation & Visualization Pipeline**: [`models/rul_prediction/inference/evaluate_rul_metrics.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/rul_prediction/inference/evaluate_rul_metrics.py) generates evaluation reports ([`docs/rul_evaluation_report.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/rul_evaluation_report.json)) and degradation trajectory charts ([`docs/rul_evaluation_trajectory.png`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/rul_evaluation_trajectory.png)).
+
