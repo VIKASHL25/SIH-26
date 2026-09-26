@@ -16,7 +16,6 @@ import {
   Play,
   Pause,
   Sliders,
-  Plane,
   ShieldAlert,
   Wind,
   Navigation,
@@ -43,8 +42,11 @@ const HOTSPOT_COMPONENTS: HotspotConfig[] = [
   { id: 'exhaust_manifold', name: 'Exhaust Header & Collector', sensorKey: 'egt1' },
 ];
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> b0a4393881c7f487ede4feee6386b41b4747aab1
 export const AeroPistonEngine3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -703,13 +705,16 @@ export const AeroPistonEngine3D: React.FC = () => {
 
         {/* Top Header Avionics HUD */}
         <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none z-20">
-          <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
-            <div className="w-3 h-3 rounded-full bg-cyan-400 animate-ping" />
+          <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-3.5 py-2 rounded-lg border border-slate-700/70 shadow-2xl pointer-events-auto">
+            <img
+              src="/garud-logo.png"
+              alt="GARUD"
+              className="w-7 h-7 rounded-full object-cover border border-amber-500/50 shadow-glow-amber bg-slate-950 flex-shrink-0"
+            />
             <div>
               <div className="flex items-center gap-2">
-                <Plane className="w-4 h-4 text-cyan-400" />
-                <h3 className="font-mono text-xs font-bold text-cyan-400 tracking-wider uppercase">
-                  MALE UAV PROPULSION DIGITAL TWIN (N190TC)
+                <h3 className="font-mono text-xs font-bold text-amber-300 tracking-wider uppercase flex items-center gap-1.5">
+                  GARUD <span className="text-slate-500">//</span> <span className="text-cyan-400">PROPULSION TWIN (TAPAS-BH-201)</span>
                 </h3>
 
                 {/* Real-Time Nominal vs Anomaly Status Badge */}

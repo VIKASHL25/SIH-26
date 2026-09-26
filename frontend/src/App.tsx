@@ -6,7 +6,7 @@ import { LiveDashboard } from './pages/LiveDashboard';
 import { MissionReplay } from './pages/MissionReplay';
 import { FleetOverview } from './pages/FleetOverview';
 import { ScenarioSimulation } from './pages/ScenarioSimulation';
-import { Shield, Database, Cpu, Radio } from 'lucide-react';
+import { Database, Cpu, Radio } from 'lucide-react';
 
 export const App: React.FC = () => {
   // Initialize continuous WebSocket telemetry stream at application root
@@ -30,11 +30,17 @@ export const App: React.FC = () => {
         </main>
 
         {/* Avionics Footer */}
-        <footer className="border-t border-slate-800/80 bg-avionics-surface/90 py-2.5 px-4 font-mono text-[11px] text-slate-500">
+        <footer className="border-t border-slate-800/80 bg-avionics-surface/90 py-2 px-4 font-mono text-[11px] text-slate-500">
           <div className="max-w-[1920px] mx-auto flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Shield className="w-3.5 h-3.5 text-cyan-400" />
-              <span>DRDO PS-26054: AI-Enabled Real-Time Digital Twin System for Aero Piston Engines in MALE UAVs</span>
+            <div className="flex items-center gap-2.5">
+              <img
+                src="/garud-logo.png"
+                alt="GARUD"
+                className="w-4 h-4 rounded-full object-cover border border-amber-500/40"
+              />
+              <span className="text-slate-300 font-semibold">PROJECT GARUD</span>
+              <span className="text-slate-600">|</span>
+              <span className="text-slate-400">DRDO PS-26054: AI-Enabled Digital Twin System for Aero Piston Engines in MALE UAVs</span>
             </div>
 
             <div className="flex items-center gap-4 text-slate-400">
