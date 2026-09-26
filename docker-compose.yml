@@ -1,0 +1,132 @@
+services:
+  # 1. Telemetry & Simulation Service (Port 8001)
+  telemetry-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: uav_telemetry_service
+    command: python services/telemetry_service/main.py
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - TELEMETRY_INPUT_MODE=${TELEMETRY_INPUT_MODE:-csv}
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY:-d8f4e2a1b9c8d7e6f5a4b3c2d1e0f9a8}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 2. AI/ML Inference Service (Port 8002)
+  ml-inference-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: uav_ml_inference_service
+    command: python services/ml_inference_service/main.py
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY:-d8f4e2a1b9c8d7e6f5a4b3c2d1e0f9a8}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 3. Explainable AI (XAI) & Advisory Service (Port 8003)
+  xai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: uav_xai_service
+    command: python services/xai_service/main.py
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY:-d8f4e2a1b9c8d7e6f5a4b3c2d1e0f9a8}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 4. MongoDB Atlas Persistence Service (Port 8004)
+  mongodb-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: uav_mongodb_service
+    command: python services/mongodb_service/main.py
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env
+    environment:
+      - MONGO_URL=${MONGO_URL}
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-aero_digital_twin_db}
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY:-d8f4e2a1b9c8d7e6f5a4b3c2d1e0f9a8}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 5. API Gateway Microservice (Port 8000)
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: uav_api_gateway
+    command: python services/api_gateway/main.py
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8001
+      - ML_SERVICE_URL=http://ml-inference-service:8002
+      - XAI_SERVICE_URL=http://xai-service:8003
+      - MONGO_SERVICE_URL=http://mongodb-service:8004
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY:-d8f4e2a1b9c8d7e6f5a4b3c2d1e0f9a8}
+    depends_on:
+      telemetry-service:
+        condition: service_healthy
+      ml-inference-service:
+        condition: service_healthy
+      xai-service:
+        condition: service_healthy
+      mongodb-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 6. React 3D Digital Twin Frontend (Port 3000 -> 80 Nginx)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: uav_frontend_dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+networks:
+  default:
+    name: uav_digital_twin_network

@@ -43,24 +43,7 @@ const HOTSPOT_COMPONENTS: HotspotConfig[] = [
   { id: 'exhaust_manifold', name: 'Exhaust Header & Collector', sensorKey: 'egt1' },
 ];
 
-// Procedural Atmospheric Sky Environment Map (18,500 FT Stratosphere to Horizon Rayleigh Glow)
-function createAtmosphericSkyTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
 
-  const grad = ctx.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0.0, '#0a1a2f'); // Stratosphere Zenith
-  grad.addColorStop(0.3, '#152d4d'); // Upper flight corridor
-  grad.addColorStop(0.6, '#284b6f'); // Mid flight level (18,500 ft)
-  grad.addColorStop(0.85, '#4f7599'); // Atmospheric horizon Rayleigh glow
-  grad.addColorStop(1.0, '#1c2e42'); // Earth/Cloud under-deck
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 512);
-
-  return new THREE.CanvasTexture(canvas);
-}
 
 export const AeroPistonEngine3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);

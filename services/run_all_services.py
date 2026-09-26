@@ -4,10 +4,11 @@ import time
 import os
 import socket
 
-from dotenv import load_dotenv
 
-# Load environment configuration from .env
+from dotenv import load_dotenv
 load_dotenv()
+
+
 
 # Force UTF-8 output encoding for Windows terminals
 if hasattr(sys.stdout, "reconfigure"):
