@@ -209,6 +209,10 @@ class MissionSimulationEngine:
         self.fault_overrides = overrides
         logger.info(f"Active fault overrides updated: {self.fault_overrides}")
 
+    def inject_fault(self, overrides: Dict[str, float]):
+        """Alias for set_fault_injection."""
+        self.set_fault_injection(overrides)
+
     def set_fault_scenario(self, fault_id: str):
         """
         Apply a named synthetic fault scenario using the existing
@@ -280,6 +284,10 @@ class MissionSimulationEngine:
         """Clears all fault overrides."""
         self.fault_overrides.clear()
         logger.info("Fault overrides cleared.")
+
+    def clear_faults(self):
+        """Alias for clear_fault_injection."""
+        self.clear_fault_injection()
 
     def close(self):
         """Release simulation resources."""

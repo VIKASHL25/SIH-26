@@ -41,12 +41,6 @@ const HOTSPOT_COMPONENTS: HotspotConfig[] = [
   { id: 'crankcase', name: 'Oil System & Crankcase', sensorKey: 'oil_pressure' },
   { id: 'exhaust_manifold', name: 'Exhaust Header & Collector', sensorKey: 'egt1' },
 ];
-
-<<<<<<< HEAD
-
-
-=======
->>>>>>> b0a4393881c7f487ede4feee6386b41b4747aab1
 export const AeroPistonEngine3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
