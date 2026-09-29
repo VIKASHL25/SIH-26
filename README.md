@@ -233,11 +233,11 @@ flowchart TD
     end
 
     %% INTER-SERVICE COMMUNICATION FLOWS
-    TELEMETRY_SVC <== "HTTP Frame Ingestion" ==> GATEWAY
-    GATEWAY <== "HTTP Sync Inference" ==> ML
-    GATEWAY <== "HTTP Sync Explainability" ==> XAI
-    GATEWAY <== "HTTP Async Persistence" ==> DB
-    GATEWAY ==> "WebSocket / REST Broadcast" ==> GCS
+    TELEMETRY_SVC <==>|HTTP Frame Ingestion| GATEWAY
+    GATEWAY <==>|HTTP Sync Inference| ML
+    GATEWAY <==>|HTTP Sync Explainability| XAI
+    GATEWAY <==>|HTTP Async Persistence| DB
+    GATEWAY -->|WebSocket / REST Broadcast| GCS
 ```
 
 ### 🔄 End-to-End Diagnostic Data Flow
