@@ -26,27 +26,17 @@ the real-time telemetry source for the demo; this does not claim a physical
 engine is connected and it is not physical-engine telemetry.
 
 ```text
-Recorded Mission CSV
+Dual-Mode Ingestion (CSV Virtual CAN / MATLAB Simulink UDP Bridge)
         ↓
-MATLAB / Simulink (1-second fixed step)
-        ↓ UDP telemetry (127.0.0.1:5005)
-UDP → CAN bridge
-        ↓ CAN-FD multicast
-CANInputReceiver
+Telemetry & Simulation Service (Port 8001)
         ↓
-Telemetry / Digital Twin backend
-        ↓
-Feature Engine
-        ↓
-ML anomaly / degradation / fault models
-        ↓
-RUL prediction
-        ↓
-XAI / advisory
-        ↓
-API Gateway
-        ↓ WebSocket
-Live Dashboard
+Physics-Informed Feature Engine (Residuals, Lags & Rolling Statistics)
+        ↕ HTTP Request / Response
+API Gateway Central Orchestrator (Port 8000)
+        ├─→ AI/ML Inference Service (Port 8002) [PCA Anomaly, XGB Degradation, XGB Faults, XGB RUL]
+        ├─→ XAI & Advisory Service (Port 8003)  [TreeSHAP, Counterfactuals & Advisories]
+        ├─→ MongoDB Persistence Service (Port 8004) [Atlas Logs, Summaries & Fleet Metadata]
+        └─→ WebSocket Stream (/ws/telemetry) ──→ React 3D GCS Dashboard
 ```
 
 The existing ML, XAI, advisory, and RUL pipeline remains unchanged downstream
@@ -150,18 +140,19 @@ All project documentation, benchmarks, security policies, and technical roadmaps
 ```
                                   +---------------------------------------+
                                   |    MALE UAV Aero Piston Engine        |
-                                  |    (Propulsion & Sensor Telemetry)    |
+                                  |  (Propulsion & Dual-Mode Telemetry)   |
                                   +-------------------+-------------------+
                                                       |
                                                       v
                                   +---------------------------------------+
                                   |     CAN Telemetry Layer (DBC Codec)   |
+                                  |  (Virtual CAN / CAN-FD Multicast RX)  |
                                   +-------------------+-------------------+
                                                       |
                                                       v
                                   +---------------------------------------+
-                                  |   Physics-Informed Feature Engine     |
-                                  |   (Thermodynamic Residuals & Lags)    |
+                                  | Telemetry & Simulation Service (:8001)|
+                                  |  (Physics-Informed Feature Engine)    |
                                   +-------------------+-------------------+
                                                       |
                     +---------------------------------+---------------------------------+
@@ -169,27 +160,28 @@ All project documentation, benchmarks, security policies, and technical roadmaps
                     v                                 v                                 v
 +-----------------------+         +-----------------------+         +-----------------------+
 |  Anomaly Detection    |         | Degradation & Faults  |         |   RUL Prediction &    |
-|  (Isolation Forest)   |         | (XGBoost Classifier)  |         | Uncertainty Bounds    |
+| (PCA Error / IsoFor)  |         | (XGBoost Reg & Class) |         | Uncertainty Bounds    |
 +-----------+-----------+         +-----------+-----------+         +-----------+-----------+
             |                                 |                                 |
             +---------------------------------+---------------------------------+
                                               |
                                               v
                                   +---------------------------------------+
-                                  |     Explainable AI (XAI) Engine       |
+                                  |  AI/ML Inference Service (Port 8002)  |
+                                  |   XAI & Advisory Service (Port 8003)  |
                                   |     (TreeSHAP & Counterfactuals)      |
                                   +-------------------+-------------------+
                                                       |
                                                       v
                                   +---------------------------------------+
                                   |     Central API Gateway Service       |
-                                  |    (WebSocket & REST Hub: Port 8000)  |
+                                  |   (Hub-and-Spoke Gateway: Port 8000)  |
                                   +---------+-------------------+---------+
                                             |                   |
                         +-------------------+                   +-------------------+
                         v                                                           v
 +-----------------------------------------------+           +-----------------------------------------------+
-|      Ground Control Station (GCS) UI          |           |         MongoDB Atlas Cloud Database          |
+|      Ground Control Station (GCS) UI          |           |         MongoDB Persistence Service (:8004)   |
 |      (Real-Time WebSocket Stream)             |           |   (Mission Telemetry, Advisories, Replay)     |
 +-----------------------------------------------+           +-----------------------------------------------+
 ```
@@ -243,68 +235,79 @@ one of the five services.
 
 ```mermaid
 flowchart TD
-    subgraph LIVE_SOURCE ["External Simulink Telemetry Source / Transport"]
-        CSV[("Recorded Mission CSV")] --> SIM["MATLAB / Simulink\n1-second fixed step"]
-        SIM --> UDP["UDP telemetry\n127.0.0.1:5005"]
+    subgraph INGESTION ["Dual-Mode Telemetry Ingestion Layer"]
+        CSV[("Recorded Mission CSV")] --> MODE_CSV["CSV Virtual CAN Mode\n(Standalone / Replay)"]
+        CSV --> MODE_SIM["MATLAB / Simulink Mode\n(1-second fixed step)"]
+        MODE_SIM --> UDP["UDP telemetry\n127.0.0.1:5005"]
         UDP --> BRIDGE["udp_can_bridge.py\nUDP → CAN bridge"]
         BRIDGE --> MCAST["CAN-FD multicast\n9-byte encoded frames"]
         MCAST --> CANRX["CANInputReceiver"]
     end
 
-    subgraph HTTP_SERVICES ["Five HTTP Microservices"]
-        TELEMETRY["Telemetry / Digital Twin Service\nPort 8001"]
-        ML_SERVICE["AI/ML Inference Service\nPort 8002"]
-        XAI_SERVICE["XAI & Advisory Service\nPort 8003"]
-        MONGO_SERVICE["Persistence Service\nPort 8004"]
-        GATEWAY["API Gateway\nPort 8000"]
-    end
-
-    CANRX --> TELEMETRY
-
-    subgraph FEATURES ["Physics-Informed Feature Engineering Layer"]
+    subgraph TELEMETRY_ENGINE ["Telemetry & Physics Engine (Port 8001)"]
+        CANRX --> TELEMETRY["Telemetry / Digital Twin Service\nPort 8001"]
+        MODE_CSV --> TELEMETRY
         TELEMETRY --> FE["DigitalTwinFeatureEngine\n(120-Frame Rolling Buffer)"]
-        FE --> FV1["13-Feat Anomaly Vector"]
-        FE --> FV2["120-Feat Degradation Vector"]
-        FE --> FV3["55-Feat Fault Vector"]
-        FE --> FV4["60-Feat RUL Vector"]
     end
 
-    FV1 & FV2 & FV3 & FV4 --> ML_SERVICE
-    ML_SERVICE --> M1["ML inference\nAnomaly / Degradation / Fault / RUL"]
-    M1 --> XAI_SERVICE
-    subgraph XAI_PIPELINE ["XAI / Advisory"]
-        XAI_SERVICE --> XAI["DigitalTwinXAIEngine"]
-        XAI --> SHAP["Additive TreeSHAP"]
-        XAI --> SENS["Counterfactual Perturbation"]
-        XAI --> MAP["FeatureMapper (Engineering Names)"]
-        XAI --> ADV["Advisory State Tracker (Anti-Spam)"]
+    subgraph HUB_GATEWAY ["Central API Gateway Orchestrator (Port 8000)"]
+        GATEWAY["API Gateway Service\nPort 8000"]
     end
 
-    subgraph PERSISTENCE ["Downstream Persistence"]
+    GATEWAY <== HTTP Step ==> TELEMETRY
+
+    subgraph ML_PIPELINE ["AI/ML Inference Microservice (Port 8002)"]
+        ML_SERVICE["AI/ML Inference Service\nPort 8002"]
+        ML_SERVICE --> M1["PCA Anomaly Error"]
+        ML_SERVICE --> M2["XGBoost Degradation Regressor"]
+        ML_SERVICE --> M3["XGBoost Multiclass Classifier"]
+        ML_SERVICE --> M4["XGBoost RUL Predictor + Anchoring"]
+    end
+
+    GATEWAY <== HTTP Predict ==> ML_SERVICE
+
+    subgraph XAI_PIPELINE ["XAI & Advisory Microservice (Port 8003)"]
+        XAI_SERVICE["XAI & Advisory Service\nPort 8003"]
+        XAI_SERVICE --> SHAP["Additive TreeSHAP"]
+        XAI_SERVICE --> SENS["Counterfactual Sensitivity"]
+        XAI_SERVICE --> MAP["FeatureMapper (Engineering Names)"]
+        XAI_SERVICE --> ADV["Advisory State Tracker (Anti-Spam)"]
+    end
+
+    GATEWAY <== HTTP Explain ==> XAI_SERVICE
+
+    subgraph PERSISTENCE ["MongoDB Persistence Microservice (Port 8004)"]
+        MONGO_SERVICE["MongoDB Persistence Service\nPort 8004"]
         LOGS[("mission_telemetry_logs")]
         SUMM[("mission_summaries")]
         ADVH[("advisory_history")]
         FLEET[("engine_fleet_metadata")]
+        MONGO_SERVICE --> LOGS & SUMM & ADVH & FLEET
     end
 
-    ADV --> GATEWAY
-    TELEMETRY -. HTTP .-> GATEWAY
-    GATEWAY --> WS["WebSocket\n/ws/telemetry"]
-    GATEWAY --> REST["REST endpoints"]
-    GATEWAY --> MONGO_SERVICE
-    MONGO_SERVICE --> LOGS & SUMM & ADVH & FLEET
+    GATEWAY <== HTTP Async Log ==> MONGO_SERVICE
 
-    WS --> GCS["Ground Control Station Dashboard"]
-    REST --> GCS
+    subgraph FRONTEND ["Ground Control Station (GCS) Dashboard"]
+        WS["WebSocket Stream\n/ws/telemetry"]
+        REST["REST API Endpoints"]
+        GATEWAY --> WS
+        GATEWAY --> REST
+        WS --> GCS_UI["React + Three.js 3D Digital Twin UI"]
+        REST --> GCS_UI
+    end
 ```
 
-The live telemetry path is therefore:
+The unified telemetry & diagnostics flow is:
 
 ```text
-Recorded Mission CSV → MATLAB / Simulink → UDP → udp_can_bridge.py
-→ CAN-FD multicast → CANInputReceiver → existing backend
-→ Physics-Informed Feature Engine → ML → XAI / advisory
-→ API Gateway → WebSocket → Ground Control Station Live Dashboard
+Telemetry Ingestion (CSV / Simulink CAN-FD)
+→ Telemetry Service (Port 8001: Physics Feature Engine)
+↕ HTTP Orchestration
+API Gateway Service (Port 8000: Hub & Spoke Orchestrator)
+  ├──► AI/ML Inference Service (Port 8002: PCA Anomaly, XGB Degradation, XGB Faults, XGB RUL)
+  ├──► XAI & Advisory Service (Port 8003: TreeSHAP, Counterfactuals & Maintenance Advisories)
+  ├──► MongoDB Persistence Service (Port 8004: Atlas Frame Logs, Summaries & Fleet Metadata)
+  └──► WebSocket Stream (/ws/telemetry) ──► React 3D Ground Control Station (GCS) Dashboard
 ```
 
 ---
@@ -333,10 +336,10 @@ All machine learning models operate as **frozen inference engines** to ensure ze
 
 | Subsystem / Model | Algorithm & Architecture | Key Evaluated Performance Metrics | Features & Input | Operational Role |
 | :--- | :--- | :--- | :---: | :--- |
-| **Model 1: Anomaly Detection** | **Unsupervised PCA / Autoencoder Reconstruction** | • **ROC-AUC**: `0.9943 (99.4%)`<br>• **Recall**: `98.21 %`<br>• **Precision**: `85.90 %`<br>• **Latency**: `2.4 timesteps (0.24s)` | $51$ Features | Early detection of sub-threshold thermodynamic drift before critical thresholds. |
-| **Model 2: Multiclass Fault Classifier** | **Multiclass XGBoost Classifier** | • **Accuracy**: `99.95 %`<br>• **Macro F1**: `0.9990`<br>• **Macro ROC-AUC (OvR)**: `1.0000`<br>• **Lubrication F1**: `1.0000`, **Injector F1**: `0.9985` | $55$ Features | Deterministic root-cause fault diagnosis across 6 failure modes. |
-| **Model 3: Prognostic RUL Predictor** | **XGBoost Regressor + Slew Filter** | • **Overall MAE**: `26.72 Hours`<br>• **Late-Life Critical MAE (<50h)**: `15.33 Hours`<br>• **$R^2$ Score**: `0.7369` (0.74)<br>• **RMSE**: `37.26 Hours` | $60$ Features | Continuous Remaining Useful Life estimation with 90% confidence intervals. |
-| **Model 4: Explainability & Recovery** | **Tree-SHAP + Bayesian MICE Imputation** | • **Packet Loss Recovery**: `98.6 %`<br>• **SHAP Latency**: `< 3.5 ms / frame`<br>• **End-to-End Pipeline**: `< 8.2 ms total` | 20+ Sensors | Physics-informed Shapley attribution & sensor dropout fault-tolerance. |
+| **Model 1: Anomaly Detection** | **Unsupervised PCA / Reconstruction Error** | • **ROC-AUC**: `0.9943 (99.4%)`<br>• **Recall**: `98.21 %`<br>• **Precision**: `85.90 %`<br>• **Latency**: `2.4 timesteps` | $51$ Features | Early detection of sub-threshold thermodynamic drift before critical thresholds. |
+| **Model 2: Degradation Estimation** | **XGBoost Regressor (Wear Index)** | • **Test MAE**: `0.00141`<br>• **Test RMSE**: `0.00525`<br>• **$R^2$ Score**: `0.99963`<br>• **Max Delta**: `< 1e-15` | $119$ Features | Continuous engine health degradation tracking from $100\% \to 0\%$ wear index. |
+| **Model 3: Multiclass Fault Classifier** | **Multiclass XGBoost Classifier** | • **Accuracy**: `99.95 %`<br>• **Macro F1**: `0.9990`<br>• **Macro ROC-AUC (OvR)**: `1.0000`<br>• **Lubrication F1**: `1.0000` | $55$ Features | Deterministic root-cause fault diagnosis across 6 discrete failure modes. |
+| **Model 4: Prognostic RUL Predictor** | **XGBoost Regressor + Anchoring Filter** | • **Overall MAE**: `26.72 Hours`<br>• **Late-Life Critical MAE (<50h)**: `15.33 Hours`<br>• **$R^2$ Score**: `0.7369`<br>• **RMSE**: `37.26 Hours` | $130$ Features | Continuous Remaining Useful Life estimation with 90% confidence intervals. |
 
 ### RUL Post-Processing & Uncertainty Quantification
 
