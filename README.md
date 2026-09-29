@@ -137,56 +137,6 @@ All project documentation, benchmarks, security policies, and technical roadmaps
 
 ---
 
-```
-                                  +---------------------------------------+
-                                  |    MALE UAV Aero Piston Engine        |
-                                  |  (Propulsion & Dual-Mode Telemetry)   |
-                                  +-------------------+-------------------+
-                                                      |
-                                                      v
-                                  +---------------------------------------+
-                                  |     CAN Telemetry Layer (DBC Codec)   |
-                                  |  (Virtual CAN / CAN-FD Multicast RX)  |
-                                  +-------------------+-------------------+
-                                                      |
-                                                      v
-                                  +---------------------------------------+
-                                  | Telemetry & Simulation Service (:8001)|
-                                  |  (Physics-Informed Feature Engine)    |
-                                  +-------------------+-------------------+
-                                                      |
-                    +---------------------------------+---------------------------------+
-                    |                                 |                                 |
-                    v                                 v                                 v
-+-----------------------+         +-----------------------+         +-----------------------+
-|  Anomaly Detection    |         | Degradation & Faults  |         |   RUL Prediction &    |
-| (PCA Error / IsoFor)  |         | (XGBoost Reg & Class) |         | Uncertainty Bounds    |
-+-----------+-----------+         +-----------+-----------+         +-----------+-----------+
-            |                                 |                                 |
-            +---------------------------------+---------------------------------+
-                                              |
-                                              v
-                                  +---------------------------------------+
-                                  |  AI/ML Inference Service (Port 8002)  |
-                                  |   XAI & Advisory Service (Port 8003)  |
-                                  |     (TreeSHAP & Counterfactuals)      |
-                                  +-------------------+-------------------+
-                                                      |
-                                                      v
-                                  +---------------------------------------+
-                                  |     Central API Gateway Service       |
-                                  |   (Hub-and-Spoke Gateway: Port 8000)  |
-                                  +---------+-------------------+---------+
-                                            |                   |
-                        +-------------------+                   +-------------------+
-                        v                                                           v
-+-----------------------------------------------+           +-----------------------------------------------+
-|      Ground Control Station (GCS) UI          |           |         MongoDB Persistence Service (:8004)   |
-|      (Real-Time WebSocket Stream)             |           |   (Mission Telemetry, Advisories, Replay)     |
-+-----------------------------------------------+           +-----------------------------------------------+
-```
-
----
 
 ## 📑 Table of Contents
 
@@ -235,80 +185,73 @@ one of the five services.
 
 ```mermaid
 flowchart TD
-    subgraph INGESTION ["Dual-Mode Telemetry Ingestion Layer"]
-        CSV[("Recorded Mission CSV")] --> MODE_CSV["CSV Virtual CAN Mode\n(Standalone / Replay)"]
-        CSV --> MODE_SIM["MATLAB / Simulink Mode\n(1-second fixed step)"]
-        MODE_SIM --> UDP["UDP telemetry\n127.0.0.1:5005"]
-        UDP --> BRIDGE["udp_can_bridge.py\nUDP → CAN bridge"]
-        BRIDGE --> MCAST["CAN-FD multicast\n9-byte encoded frames"]
-        MCAST --> CANRX["CANInputReceiver"]
+    %% LAYER 1: TELEMETRY INGESTION
+    subgraph STAGE1 ["1. Dual-Mode Telemetry & Transport Boundary"]
+        direction LR
+        CSV["CSV Virtual CAN Mode<br/>(Recorded CSV Replay)"]
+        SIM["MATLAB / Simulink Mode<br/>(1s Fixed-Step UDP :5005)"] --> UDP_BRIDGE["UDP to CAN-FD Bridge<br/>(udp_can_bridge.py)"]
+        UDP_BRIDGE --> CAN_RX["CANInputReceiver<br/>(8 DBC Message IDs / 9 Bytes)"]
     end
 
-    subgraph TELEMETRY_ENGINE ["Telemetry & Physics Engine (Port 8001)"]
-        CANRX --> TELEMETRY["Telemetry / Digital Twin Service\nPort 8001"]
-        MODE_CSV --> TELEMETRY
-        TELEMETRY --> FE["DigitalTwinFeatureEngine\n(120-Frame Rolling Buffer)"]
+    %% LAYER 2: TELEMETRY SERVICE
+    subgraph STAGE2 ["2. Telemetry & Physics Processing (Port 8001)"]
+        CSV --> TELEMETRY_SVC["Telemetry & Simulation Service (:8001)<br/>• 20 Sensor Signals & Thermodynamic Residuals<br/>• Synthetic Fault Injector & 120-Frame Buffer"]
+        CAN_RX --> TELEMETRY_SVC
     end
 
-    subgraph HUB_GATEWAY ["Central API Gateway Orchestrator (Port 8000)"]
-        GATEWAY["API Gateway Service\nPort 8000"]
+    %% LAYER 3: HUB ORCHESTRATOR
+    subgraph STAGE3 ["3. API Gateway Central Orchestrator (Port 8000)"]
+        GATEWAY["API Gateway Service (:8000)<br/>• Hub-and-Spoke Microservices Coordinator<br/>• REST API & Real-time WebSocket Server"]
     end
 
-    GATEWAY <== HTTP Step ==> TELEMETRY
+    %% LAYER 4: SPECIALISED SERVICES
+    subgraph STAGE4 ["4. Specialised Microservices Ecosystem"]
+        direction LR
+        
+        subgraph ML["AI/ML Inference Service (:8002)"]
+            M1["Model 1: PCA Anomaly Error (51 Feat)"]
+            M2["Model 2: XGB Degradation (119 Feat)"]
+            M3["Model 3: XGB Fault Classifier (55 Feat)"]
+            M4["Model 4: XGB RUL Predictor (130 Feat)"]
+        end
 
-    subgraph ML_PIPELINE ["AI/ML Inference Microservice (Port 8002)"]
-        ML_SERVICE["AI/ML Inference Service\nPort 8002"]
-        ML_SERVICE --> M1["PCA Anomaly Error"]
-        ML_SERVICE --> M2["XGBoost Degradation Regressor"]
-        ML_SERVICE --> M3["XGBoost Multiclass Classifier"]
-        ML_SERVICE --> M4["XGBoost RUL Predictor + Anchoring"]
+        subgraph XAI["XAI & Advisory Service (:8003)"]
+            X1["TreeSHAP Explainability"]
+            X2["Counterfactual Sensitivity"]
+            X3["Anti-Spam Advisory Tracker"]
+        end
+
+        subgraph DB["MongoDB Persistence Service (:8004)"]
+            D1[("MongoDB Atlas Cloud")]
+            D2["Telemetry & Fault History Logs"]
+        end
     end
 
-    GATEWAY <== HTTP Predict ==> ML_SERVICE
-
-    subgraph XAI_PIPELINE ["XAI & Advisory Microservice (Port 8003)"]
-        XAI_SERVICE["XAI & Advisory Service\nPort 8003"]
-        XAI_SERVICE --> SHAP["Additive TreeSHAP"]
-        XAI_SERVICE --> SENS["Counterfactual Sensitivity"]
-        XAI_SERVICE --> MAP["FeatureMapper (Engineering Names)"]
-        XAI_SERVICE --> ADV["Advisory State Tracker (Anti-Spam)"]
+    %% LAYER 5: FRONTEND DASHBOARD
+    subgraph STAGE5 ["5. Ground Control Station Presentation"]
+        GCS["GCS 3D Twin Dashboard<br/>• React + Three.js 3D UAV Telemetry View<br/>• Live Gauges & Maintenance Advisory Feed"]
     end
 
-    GATEWAY <== HTTP Explain ==> XAI_SERVICE
-
-    subgraph PERSISTENCE ["MongoDB Persistence Microservice (Port 8004)"]
-        MONGO_SERVICE["MongoDB Persistence Service\nPort 8004"]
-        LOGS[("mission_telemetry_logs")]
-        SUMM[("mission_summaries")]
-        ADVH[("advisory_history")]
-        FLEET[("engine_fleet_metadata")]
-        MONGO_SERVICE --> LOGS & SUMM & ADVH & FLEET
-    end
-
-    GATEWAY <== HTTP Async Log ==> MONGO_SERVICE
-
-    subgraph FRONTEND ["Ground Control Station (GCS) Dashboard"]
-        WS["WebSocket Stream\n/ws/telemetry"]
-        REST["REST API Endpoints"]
-        GATEWAY --> WS
-        GATEWAY --> REST
-        WS --> GCS_UI["React + Three.js 3D Digital Twin UI"]
-        REST --> GCS_UI
-    end
+    %% INTER-SERVICE COMMUNICATION FLOWS
+    TELEMETRY_SVC <== "HTTP Frame Ingestion" ==> GATEWAY
+    GATEWAY <== "HTTP Sync Inference" ==> ML
+    GATEWAY <== "HTTP Sync Explainability" ==> XAI
+    GATEWAY <== "HTTP Async Persistence" ==> DB
+    GATEWAY ==> "WebSocket / REST Broadcast" ==> GCS
 ```
 
-The unified telemetry & diagnostics flow is:
+### 🔄 End-to-End Diagnostic Data Flow
 
-```text
-Telemetry Ingestion (CSV / Simulink CAN-FD)
-→ Telemetry Service (Port 8001: Physics Feature Engine)
-↕ HTTP Orchestration
-API Gateway Service (Port 8000: Hub & Spoke Orchestrator)
-  ├──► AI/ML Inference Service (Port 8002: PCA Anomaly, XGB Degradation, XGB Faults, XGB RUL)
-  ├──► XAI & Advisory Service (Port 8003: TreeSHAP, Counterfactuals & Maintenance Advisories)
-  ├──► MongoDB Persistence Service (Port 8004: Atlas Frame Logs, Summaries & Fleet Metadata)
-  └──► WebSocket Stream (/ws/telemetry) ──► React 3D Ground Control Station (GCS) Dashboard
-```
+The unified telemetry execution path follows a clean, single-direction flow from edge transport to ground control station:
+
+1. **Telemetry Ingestion Layer**: Ingests raw telemetry via virtual CAN CSV replay or Simulink UDP multicast bridge (`udp_can_bridge.py`).
+2. **Physics Engine (Port 8001)**: Computes dynamic thermodynamic residuals, rolling statistics, and maintains a 120-frame sliding window buffer.
+3. **Hub Orchestration (Port 8000)**: Coordinates parallel microservices calls for each simulation timestep via HTTP REST requests.
+4. **Specialized Microservices Ecosystem**:
+   - **AI/ML Inference Service (Port 8002)**: Evaluates 4 frozen ML models simultaneously (Anomaly, Wear Degradation, Fault Classification, RUL Prediction).
+   - **XAI & Advisory Service (Port 8003)**: Calculates TreeSHAP feature attributions, counterfactual anomaly distances, and natural language maintenance advisories.
+   - **MongoDB Persistence Service (Port 8004)**: Asynchronously archives frame logs, summaries, and advisories to MongoDB Atlas.
+5. **GCS Presentation Layer**: Broadcasts enriched telemetry frames over WebSocket (`ws://127.0.0.1:8000/ws/telemetry`) to the React & Three.js 3D Digital Twin GCS dashboard.
 
 ---
 
