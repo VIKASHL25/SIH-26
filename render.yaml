@@ -1,11 +1,15 @@
 services:
-  # 1. Unified Microservices Backend (FastAPI Services)
+  # The existing Python launcher keeps the five FastAPI processes together in
+  # one Render web service. The API gateway is the public port; the other
+  # fixed ports remain private to this same instance and continue to use the
+  # existing localhost service URLs.
   - type: web
     name: aero-digital-twin-backend
-    env: python
+    runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python services/run_all_services.py
-    autoDeploy: true
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
     envVars:
       - key: TELEMETRY_INPUT_MODE
         value: csv
@@ -14,15 +18,20 @@ services:
       - key: MONGO_URL
         sync: false
       - key: INTERNAL_SERVICE_KEY
-        sync: false
+        generateValue: true
 
-  # 2. React 3D GCS Dashboard Frontend
+  # React 3D GCS Dashboard. The WebSocket URL is derived from the gateway
+  # URL during the static-site build so it is not tied to localhost.
   - type: web
     name: aero-digital-twin-frontend
-    env: static
-    buildCommand: cd frontend && npm install && npm run build
+    runtime: static
+    buildCommand: >-
+      cd frontend && npm ci &&
+      VITE_WS_URL="$(printf '%s' "$VITE_API_BASE_URL" |
+      sed -e 's#^https:#wss:#' -e 's#^http:#ws:#')/ws/telemetry"
+      npm run build
     staticPublishPath: frontend/dist
-    autoDeploy: true
+    autoDeployTrigger: commit
     routes:
       - type: rewrite
         source: /*
@@ -30,6 +39,6 @@ services:
     envVars:
       - key: VITE_API_BASE_URL
         fromService:
-          type: web
           name: aero-digital-twin-backend
-          property: url
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
