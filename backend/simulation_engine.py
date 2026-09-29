@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
 
-from backend.config import DATASET_100K_PATH
+from backend.config import DATASET_100K_PATH, ANOMALY_THRESHOLD
 from backend.model_loader import DigitalTwinModelManager
 from backend.feature_engine import DigitalTwinFeatureEngine
 from backend.can_adapter import CANTelemetryAdapter
@@ -79,7 +79,7 @@ class MissionSimulationEngine:
         # Simulation State
         self.state: str = "STOPPED"  # STOPPED, RUNNING, PAUSED
         self.speed: float = 1.0       # Replay speed multiplier
-        self.anomaly_threshold: float = 0.0
+        self.anomaly_threshold: float = ANOMALY_THRESHOLD
 
         # Alert State Tracking per Mission (Anti-Spam)
         self.last_alert_levels: Dict[str, Any] = {}

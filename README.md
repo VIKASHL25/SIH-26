@@ -28,14 +28,20 @@ engine is connected and it is not physical-engine telemetry.
 ```text
 Dual-Mode Ingestion (CSV Virtual CAN / MATLAB Simulink UDP Bridge)
         ↓
+MATLAB / Simulink (1-second fixed step)
+        ↓ UDP telemetry (127.0.0.1:5005)
+UDP → CAN bridge
+        ↓ CAN-FD multicast
+CANInputReceiver
+        ↓
 Telemetry & Simulation Service (Port 8001)
         ↓
 Physics-Informed Feature Engine (Residuals, Lags & Rolling Statistics)
         ↕ HTTP Request / Response
 API Gateway Central Orchestrator (Port 8000)
         ├─→ AI/ML Inference Service (Port 8002) [PCA Anomaly, XGB Degradation, XGB Faults, XGB RUL]
-        ├─→ XAI & Advisory Service (Port 8003)  [TreeSHAP, Counterfactuals & Advisories]
-        ├─→ MongoDB Persistence Service (Port 8004) [Atlas Logs, Summaries & Fleet Metadata]
+        ├─→ XAI & Advisory Service (Port 8003) [TreeSHAP, Counterfactuals & Advisories]
+        ├─→ MongoDB Persistence Service (Port 8004) [Atlas / In-Memory Persistence]
         └─→ WebSocket Stream (/ws/telemetry) ──→ React 3D GCS Dashboard
 ```
 
@@ -49,7 +55,7 @@ Live-mode mission selection is intentionally limited to Missions `1`–`100`.
 Mission `999` is historical-only and is not offered as a Simulink live mission.
 Selecting a mission prepares it and leaves the dashboard `PAUSED`; it does not
 start MATLAB or Simulink. Clicking `STREAM LIVE` starts the selected mission.
-The current pause behavior terminates the MATLAB/Simulink process rather than
+The current `STOP` behavior terminates the MATLAB/Simulink process rather than
 preserving exact Simulink simulation time for resume.
 
 ### MATLAB / Simulink Live Telemetry Layer
@@ -64,7 +70,7 @@ Selecting a mission only prepares it; it does not launch Simulink. `STREAM
 LIVE` causes the backend `SimulinkController` to launch the selected mission.
 Mission `999` is historical-only. Keep `simulink/udp_can_bridge.py` running as
 a separate persistent process during streaming, and keep dashboard playback at
-`1x` so Simulink samples remain synchronized. `PAUSE` currently terminates the
+`1x` so Simulink samples remain synchronized. `STOP` currently terminates the
 MATLAB/Simulink process rather than preserving exact simulation time for resume.
 
 ### Verified live startup
@@ -106,7 +112,7 @@ Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/). The API Gateway is at
 | Backend ML | PASS | Anomaly, degradation, and fault outputs present |
 | XAI/advisory | PASS | Enriched frames include XAI and advisories |
 | RUL | PASS | RUL history warm-up reached prediction state |
-| API Gateway | PASS | Load, start, and pause endpoints verified |
+| API Gateway | PASS | Load, start, and stop endpoints verified |
 | WebSocket | PASS | Enriched live telemetry frames received |
 | Frontend build | PASS | Existing production build completed |
 | Mission 25 live dashboard | PASS | Live sensors and ML/XAI/RUL visible for Mission 25 |
@@ -118,7 +124,7 @@ Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/). The API Gateway is at
 
 Medium-Altitude Long-Endurance (MALE) Unmanned Aerial Vehicles (UAVs)—such as the **DRDO TAPAS-BH-201** class—perform mission-critical Intelligence, Surveillance, Target Acquisition, and Reconnaissance (ISTAR) sorties requiring uninterrupted propulsion powertrain reliability. In-flight aero piston engine failures present catastrophic operational and mission risks.
 
-**Project GARUD** (*AI-Enabled Digital Twin System for Aero-Engine Health Monitoring, Fault Prediction and Mission Reliability*) delivers a defense-grade, physics-informed, AI-driven predictive health monitoring and prognostic digital twin ecosystem. It models thermodynamic engine behavior, processes high-frequency engine sensor telemetry through standardized CAN-FD bus protocols, executes synchronized machine learning inference models, attributes root causes using Explainable AI (Tree-SHAP & Counterfactual Sensitivity), and streams live mission health metrics to Ground Control Station (GCS) dashboards with Three.js 3D twin visualization while archiving complete mission trajectories to MongoDB Atlas.
+**Project GARUD** (*AI-Enabled Digital Twin System for Aero-Engine Health Monitoring, Fault Prediction and Mission Reliability*) delivers a defense-grade, physics-informed, AI-driven predictive health monitoring and prognostic digital twin ecosystem. It models thermodynamic engine behavior, processes high-frequency engine sensor telemetry through standardized CAN-FD bus protocols, executes synchronized machine learning inference models, attributes root causes using Explainable AI (Tree-SHAP & Counterfactual Sensitivity), and streams live mission health metrics to Ground Control Station (GCS) dashboards with Three.js 3D twin visualization while archiving complete mission trajectories through the persistence service.
 
 ---
 
@@ -137,6 +143,54 @@ All project documentation, benchmarks, security policies, and technical roadmaps
 
 ---
 
+```
+                                  +---------------------------------------+
+                                  |    MALE UAV Aero Piston Engine        |
+                                  |    (Propulsion & Sensor Telemetry)    |
+                                  +-------------------+-------------------+
+                                                      |
+                                                      v
+                                  +---------------------------------------+
+                                  |     CAN Telemetry Layer (DBC Codec)   |
+                                  +-------------------+-------------------+
+                                                      |
+                                                      v
+                                  +---------------------------------------+
+                                  |   Physics-Informed Feature Engine     |
+                                  |   (Thermodynamic Residuals & Lags)    |
+                                  +-------------------+-------------------+
+                                                      |
+                    +---------------------------------+---------------------------------+
+                    |                                 |                                 |
+                    v                                 v                                 v
++-----------------------+         +-----------------------+         +-----------------------+
+|  Anomaly Detection    |         | Degradation & Faults  |         |   RUL Prediction &    |
+|  (PCA Reconstruction)   |         | (XGBoost Classifier)  |         | Uncertainty Bounds    |
++-----------+-----------+         +-----------+-----------+         +-----------+-----------+
+            |                                 |                                 |
+            +---------------------------------+---------------------------------+
+                                              |
+                                              v
+                                  +---------------------------------------+
+                                  |     Explainable AI (XAI) Engine       |
+                                  |     (TreeSHAP & Counterfactuals)      |
+                                  +-------------------+-------------------+
+                                                      |
+                                                      v
+                                  +---------------------------------------+
+                                  |     Central API Gateway Service       |
+                                  |    (WebSocket & REST Hub: Port 8000)  |
+                                  +---------+-------------------+---------+
+                                            |                   |
+                        +-------------------+                   +-------------------+
+                        v                                                           v
++-----------------------------------------------+           +-----------------------------------------------+
+|      Ground Control Station (GCS) UI          |           |      Persistence Backend (Atlas / Memory)     |
+|      (Real-Time WebSocket Stream)             |           |   (Mission Telemetry, Advisories, Replay)     |
++-----------------------------------------------+           +-----------------------------------------------+
+```
+
+---
 
 ## 📑 Table of Contents
 
@@ -160,20 +214,20 @@ All project documentation, benchmarks, security policies, and technical roadmaps
 
 ## 🌟 Key Highlights & Capabilities
 
-- ⚡ **Five HTTP Microservices + Simulink Telemetry Layer**: Decoupled services downstream of the recorded-mission Simulink source, orchestrating telemetry processing, ML inference, explainability, persistence, and API gateway operations.
-- 🔬 **Physics-Informed Thermodynamics**: Calculates dynamic residuals between real-time sensor observations and expected physical values ($CHT_{\text{residual}}$, $EGT_{\text{residual}}$, $RPM_{\text{residual}}$, Fuel/Air ratios, Thermal efficiency).
-- 🧠 **Multi-Model AI/ML Diagnostics**:
-  1. **Anomaly Detection**: Unsupervised Isolation Forest isolating multivariate operating outliers.
-  2. **Degradation Estimation**: XGBoost Regressor tracking wear progression from $0.0$ to $1.0$ (Health: $100\% \to 0\%$).
+- **Five HTTP Microservices + Simulink Telemetry Layer**: Decoupled services downstream of the recorded-mission Simulink source, orchestrating telemetry processing, ML inference, explainability, persistence, and API gateway operations.
+- **Physics-Informed Thermodynamics**: Calculates dynamic residuals between real-time sensor observations and expected physical values (CHT residual, EGT residual, RPM residual, fuel/air ratios, and thermal efficiency).
+- **Multi-Model AI/ML Diagnostics**:
+  1. **Anomaly Detection**: PCA reconstruction error over a scaled 51-feature vector, using 10 principal components and threshold `19.528`.
+  2. **Degradation Estimation**: XGBoost Regressor tracking wear progression from 0.0 to 1.0 (Health: 100% → 0%).
   3. **Multiclass Fault Classification**: XGBoost Classifier categorizing specific failure modes (Overheating, Lubrication Breakdown, Injector Degradation, Misfire, Sensor Bias).
-  4. **RUL Estimation**: XGBoost Regressor predicting Remaining Useful Life in flight hours with dynamic degradation lifecycle anchoring, EMA smoothing, and $90\%$ confidence bounds ($P_{10} - P_{90}$).
-- 🔍 **Transparent Explainable AI (XAI)**:
+  4. **RUL Estimation**: XGBoost Regressor predicting Remaining Useful Life in flight hours with dynamic degradation lifecycle anchoring, EMA smoothing, and 90% confidence bounds (P10–P90).
+- **Transparent Explainable AI (XAI)**:
   - Additive TreeSHAP value decomposition for tree-based models.
-  - Counterfactual sensitivity analysis and normalized Z-score distance metrics for Isolation Forest anomalies.
+  - Counterfactual sensitivity analysis and normalized feature-distance metrics for PCA reconstruction-error anomalies.
   - Human-interpretable engineering narratives and actionable maintenance advisories.
-- 📡 **CAN-FD Telemetry Boundary**: Complete DBC specification (`engine_can.dbc`) encoding/decoding raw sensor signals for the verified UDP multicast transport. Encoded frames are 9 bytes because of the checksum and therefore require CAN-FD.
-- ☁️ **Mission Telemetry & Fleet History in MongoDB Atlas**: Automatic frame-by-frame logging, mission summaries, advisory history, and full historical mission trajectory playback.
-- 🛠️ **Synthetic Fault Injection Engine**: Real-time what-if scenario testing (e.g. inject $+30^\circ\text{C}$ CHT rise or $-2.0\,\text{bar}$ oil pressure drop) to validate model diagnostics live.
+- **CAN-FD Telemetry Boundary**: Complete DBC specification (`engine_can.dbc`) encoding/decoding raw sensor signals for the verified UDP multicast transport. Encoded frames are 9 bytes because of the checksum and therefore require CAN-FD.
+- **Mission Telemetry & Fleet History**: MongoDB Atlas persistence is supported as an external backend; when Atlas is unavailable, the persistence service automatically falls back to in-memory storage so the system continues operating.
+- **Synthetic Fault Injection Engine**: Real-time what-if scenario testing (e.g. inject +30 °C CHT rise or −2.0 bar oil pressure drop) to validate model diagnostics live.
 
 ---
 
@@ -263,7 +317,7 @@ The unified telemetry execution path follows a clean, single-direction flow from
 | **Telemetry & Simulation Service** | `8001` | Ingests mission telemetry, executes physics reference models, manages playback states (`RUNNING`, `PAUSED`, `SEEK`, `SPEED`), and handles fault injection. | `GET /health` |
 | **AI/ML Inference Service** | `8002` | Executes all 4 frozen machine learning models simultaneously, returning consolidated health statuses, probabilities, degradation indices, and RUL. | `GET /health` |
 | **XAI & Advisory Service** | `8003` | Generates local SHAP feature attributions, counterfactual anomaly recovery scores, sensor-level impact rankings, and natural language maintenance advisories. | `GET /health` |
-| **MongoDB Persistence Service** | `8004` | Connects directly to MongoDB Atlas cluster, performs indexed batch persistence of mission frames, advisories, fault logs, and supplies mission replay data. | `GET /health` |
+| **MongoDB Persistence Service** | `8004` | Supports MongoDB Atlas as an external persistence backend, with automatic in-memory fallback when Atlas is unavailable; performs indexed persistence and supplies mission replay data. | `GET /health` |
 
 ---
 
@@ -278,29 +332,28 @@ All machine learning models operate as **frozen inference engines** to ensure ze
 ### 📊 Model Architecture & Evaluated Performance Benchmarks
 
 | Subsystem / Model | Algorithm & Architecture | Key Evaluated Performance Metrics | Features & Input | Operational Role |
-| :--- | :--- | :--- | :---: | :--- |
-| **Model 1: Anomaly Detection** | **Unsupervised PCA / Reconstruction Error** | • **ROC-AUC**: `0.9943 (99.4%)`<br>• **Recall**: `98.21 %`<br>• **Precision**: `85.90 %`<br>• **Latency**: `2.4 timesteps` | $51$ Features | Early detection of sub-threshold thermodynamic drift before critical thresholds. |
-| **Model 2: Degradation Estimation** | **XGBoost Regressor (Wear Index)** | • **Test MAE**: `0.00141`<br>• **Test RMSE**: `0.00525`<br>• **$R^2$ Score**: `0.99963`<br>• **Max Delta**: `< 1e-15` | $119$ Features | Continuous engine health degradation tracking from $100\% \to 0\%$ wear index. |
-| **Model 3: Multiclass Fault Classifier** | **Multiclass XGBoost Classifier** | • **Accuracy**: `99.95 %`<br>• **Macro F1**: `0.9990`<br>• **Macro ROC-AUC (OvR)**: `1.0000`<br>• **Lubrication F1**: `1.0000` | $55$ Features | Deterministic root-cause fault diagnosis across 6 discrete failure modes. |
-| **Model 4: Prognostic RUL Predictor** | **XGBoost Regressor + Anchoring Filter** | • **Overall MAE**: `26.72 Hours`<br>• **Late-Life Critical MAE (<50h)**: `15.33 Hours`<br>• **$R^2$ Score**: `0.7369`<br>• **RMSE**: `37.26 Hours` | $130$ Features | Continuous Remaining Useful Life estimation with 90% confidence intervals. |
+| **Model 1: Anomaly Detection** | **Unsupervised PCA / Reconstruction Error** | • **ROC-AUC**: `0.9943 (99.4%)`<br>• **Recall**: `98.21 %`<br>• **Precision**: `85.90 %`<br>• **Latency**: `2.4 timesteps` | 51 features, 10 components | Early detection of sub-threshold thermodynamic drift before critical thresholds. |
+| **Model 2: Degradation Estimation** | **XGBoost Regressor (Wear Index)** | • **Test MAE**: `0.00141`<br>• **Test RMSE**: `0.00525`<br>• **R² Score**: `0.99963`<br>• **Max Delta**: `< 1e-15` | 119 features | Continuous engine health degradation tracking from `100% → 0%` wear index. |
+| **Model 3: Multiclass Fault Classifier** | **Multiclass XGBoost Classifier** | • **Accuracy**: `99.95 %`<br>• **Macro F1**: `0.9990`<br>• **Macro ROC-AUC (OvR)**: `1.0000`<br>• **Lubrication F1**: `1.0000`<br>• **Injector F1**: `0.9985` | 55 features | Deterministic root-cause fault diagnosis across 6 discrete failure modes. |
+| **Model 4: Prognostic RUL Predictor** | **XGBoost Regressor + Anchoring Filter** | • **Overall MAE**: `26.72 Hours`<br>• **Late-Life Critical MAE (<50h)**: `15.33 Hours`<br>• **R² Score**: `0.7369`<br>• **RMSE**: `37.26 Hours` | 130 features | Continuous Remaining Useful Life estimation with 90% confidence intervals. |
 
 ### RUL Post-Processing & Uncertainty Quantification
 
 To eliminate sensor noise and produce physically realistic, monotonically decreasing flight hours, the RUL inference engine incorporates a robust post-processing pipeline:
 
 1. **Failure-State Dynamic Physical Anchoring**:
-   - If degradation reaches failure threshold ($\ge 0.98$), RUL is clamped directly to $0.0\,\text{hours}$.
+   - If degradation reaches the failure threshold (≥ 0.98), RUL is clamped directly to 0.0 hours.
    - For intermediate health states, raw ML output is dynamically blended with physical lifecycle targets:
-     $$\text{RUL}_{\text{target}} = \left(\frac{\text{Health}\%}{100}\right) \times 50.0\,\text{hrs}$$
-     $$\text{RUL}_{\text{anchored}} = 0.3 \times \text{RUL}_{\text{raw}} + 0.7 \times \text{RUL}_{\text{target}}$$
+   - Target RUL = (Health % / 100) × 50.0 hours
+   - Anchored RUL = 0.3 × raw RUL + 0.7 × target RUL
 2. **Exponential Moving Average (EMA) Filtering**:
-   - Low-pass smoothing ($\alpha = 0.12$) removes high-frequency fluctuations caused by transient throttle bursts.
+   - Low-pass smoothing (α = 0.12) removes high-frequency fluctuations caused by transient throttle bursts.
 3. **Slew-Rate Limiting**:
-   - Caps rate of change per tick ($+0.5\,\text{h}$ max climb, $-2.0\,\text{h}$ max descent) preventing discontinuous jumps.
-4. **Sub-Ensemble Boosting Round Variance Estimation ($90\%$ CI)**:
-   - Evaluates predictions across 10 checkpoint sub-ensembles along the boosting tree sequence to estimate prediction variance ($\sigma$).
-   - Calculates $90\%$ Confidence Intervals:
-     $$\text{P10} = \max\left(0, \text{RUL} - 1.645 \cdot \sigma\right), \quad \text{P90} = \text{RUL} + 1.645 \cdot \sigma$$
+   - Caps rate of change per tick (+0.5 h max climb, −2.0 h max descent) preventing discontinuous jumps.
+4. **Sub-Ensemble Boosting Round Variance Estimation (90% CI)**:
+   - Evaluates predictions across 10 checkpoint sub-ensembles along the boosting tree sequence to estimate prediction variance (σ).
+   - Calculates the 90% confidence interval:
+     P10 = max(0, RUL − 1.645 × σ), P90 = RUL + 1.645 × σ
 
 ---
 
@@ -339,15 +392,15 @@ Black-box predictions are unacceptable in aviation. The XAI layer translates mul
 
 ### Explanation Techniques by Model
 
-1. **Isolation Forest Counterfactual Sensitivity**:
-   - Evaluates the score recovery when feature $i$ is returned to nominal mean baseline ($\Delta \text{score}_i = f(X_{\text{nominal\_i}}) - f(X)$).
+1. **PCA Reconstruction-Error Counterfactual Sensitivity**:
+   - Evaluates score recovery when feature `i` is returned to the nominal mean baseline: Δ score = score with the nominal feature − current score.
    - Identifies which physical parameters are actively pulling the engine into an anomalous state.
 2. **TreeSHAP for Multiclass Fault Classification**:
-   - Computes exact Shapley values on tree log-odds for the diagnosed fault class $C_{\text{pred}}$, showing which sensor drifts caused the fault classification.
+   - Computes exact Shapley values on tree log-odds for the diagnosed predicted fault class, showing which sensor drifts caused the fault classification.
 3. **Dual-Source Degradation Attribution**:
    - Identifies whether wear is driven by thermal stress (high CHT/EGT), lubrication breakdown (oil pressure/temp), or mechanical friction (vibration RMS).
 4. **Intelligent Feature Mapper (`FeatureMapper`)**:
-   - Aggregates rolling statistics, lag terms, and derivatives into their parent physical sensors (e.g. `cht_C_rollmean30`, `cht_C_diff10`, and `cht_residual` $\to$ **Cylinder Head Temperature (CHT)**).
+   - Aggregates rolling statistics, lag terms, and derivatives into their parent physical sensors (e.g. `cht_C_rollmean30`, `cht_C_diff10`, and `cht_residual` → **Cylinder Head Temperature (CHT)**).
 
 ---
 
@@ -384,7 +437,7 @@ described as classic CAN 2.0B frames.
 | `0x107` | `AIR_DENSITY` | 8 | Air Density |
 
 The `CANTelemetryAdapter` in `backend/can_adapter.py` acts as a bi-directional transceiver:
-$$\text{Raw Telemetry} \xrightarrow{\text{Encode}} \text{CAN Frames} \xrightarrow{\text{Transmit}} \text{CAN Bus (Virtual/Hardware)} \xrightarrow{\text{Receive}} \text{CAN Frames} \xrightarrow{\text{Decode}} \text{Normalized Signals}$$
+Raw Telemetry → Encode → CAN Frames → Transmit → CAN Bus (Virtual/Hardware) → Receive → CAN Frames → Decode → Normalized Signals
 
 ---
 
@@ -393,17 +446,19 @@ $$\text{Raw Telemetry} \xrightarrow{\text{Encode}} \text{CAN Frames} \xrightarro
 The `DigitalTwinFeatureEngine` maintains a rolling temporal window (120 frames) to compute physical residuals and thermodynamic correlations:
 
 ### 1. Thermodynamic Reference Calculations
-- **Expected Cylinder Head Temp ($CHT_{\text{exp}}$)**: Baseline thermal response mapped to throttle, load, and ambient temperature.
-- **Expected Exhaust Gas Temp ($EGT_{\text{exp}}$)**: Combustion heat profile baseline.
+- **Expected Cylinder Head Temp (CHT exp)**: Baseline thermal response mapped to throttle, load, and ambient temperature.
+- **Expected Exhaust Gas Temp (EGT exp)**: Combustion heat profile baseline.
 - **Physics Residuals**:
-  $$\Delta CHT = CHT_{\text{measured}} - CHT_{\text{exp}}$$
-  $$\Delta EGT = EGT_{\text{measured}} - EGT_{\text{exp}}$$
-  $$\Delta RPM = RPM_{\text{measured}} - RPM_{\text{exp}}$$
+  Δ CHT = measured CHT − expected CHT
+
+  Δ EGT = measured EGT − expected EGT
+
+  Δ RPM = measured RPM − expected RPM
 
 ### 2. Dimensionless Thermodynamic Ratios
-- **Fuel-to-Air Ratio**: $\Phi = \frac{\dot{m}_{\text{fuel}}}{\dot{m}_{\text{air}} + \epsilon}$
-- **Specific Energy Conversion**: $\eta_{\text{thermal}} = \frac{P_{\text{mech}}}{\dot{m}_{\text{fuel}} + \epsilon}$
-- **Specific Torque Efficiency**: $\tau_{\text{rpm}} = \frac{\tau}{\text{RPM} + \epsilon}$
+- **Fuel-to-Air Ratio**: fuel mass flow / (air mass flow + ε)
+- **Specific Energy Conversion**: mechanical power / (fuel mass flow + ε)
+- **Specific Torque Efficiency**: torque / (RPM + ε)
 
 ### 3. Dynamic Time-Series Lags & Moving Statistics
 - **Differencing**: 1-step, 5-step, and 10-step delta gradients.
@@ -414,15 +469,15 @@ The `DigitalTwinFeatureEngine` maintains a rolling temporal window (120 frames) 
 
 ## 🗄️ Database Schema & MongoDB Atlas Integration
 
-The system persists telemetry and diagnostics in real time to **MongoDB Atlas** (`aero_digital_twin_db`) via `services/mongodb_service/`.
+The persistence service supports **MongoDB Atlas** (`aero_digital_twin_db`) as an external backend via `services/mongodb_service/`. When Atlas is unavailable, it automatically falls back to in-memory storage so the system continues operating.
 
 ```
 aero_digital_twin_db
- ├── mission_telemetry_logs    (Frame-by-frame sensor telemetry, residuals, ML predictions, XAI drivers)
- ├── mission_summaries         (Flight duration, peak thermal loads, min oil pressure, health trajectories)
- ├── advisory_history          (Logged alerts, severity levels, recommended maintenance actions)
- ├── fault_injection_logs      (Injected parameter overrides, detected fault classifications)
- └── engine_fleet_metadata     (Engine serial numbers, UAV tail numbers, total operating hours, airworthiness)
+├── mission_telemetry_logs    (Frame-by-frame sensor telemetry, residuals, ML predictions, XAI drivers)
+├── mission_summaries         (Flight duration, peak thermal loads, min oil pressure, health trajectories)
+├── advisory_history          (Logged alerts, severity levels, recommended maintenance actions)
+├── fault_injection_logs      (Injected parameter overrides, detected fault classifications)
+└── engine_fleet_metadata     (Engine serial numbers, UAV tail numbers, total operating hours, airworthiness)
 ```
 
 ### Indexed Collections
@@ -450,73 +505,73 @@ SIH-26/
 │   ├── feature_engine.py                  # Physics Residuals & 120-Feature Rolling Engine
 │   ├── model_loader.py                    # Unified 4-Model Manager & Temporal Filtering
 │   ├── simulation_engine.py               # Flight Simulation & Replay Engine
-│   ├── can_receiver.py                     # CAN-FD Multicast Receiver for Simulink Telemetry
-│   ├── simulink_controller.py              # MATLAB/Simulink Mission Process Controller
-│   └── verify_microservices.py            # End-to-End Microservices Test Suite
+│   ├── can_receiver.py                    # CAN-FD Multicast Receiver for Simulink Telemetry
+│   ├── simulink_controller.py             # MATLAB/Simulink Mission Process Controller
+│   └── verify_microservices.py             # End-to-End Microservices Test Suite
 │
 ├── can_layer/                              # CAN Bus Hardware Interface Layer
-│   ├── bus.py                             # python-can Bus Provider (Virtual / SocketCAN)
-│   ├── can_codec.py                       # DBC Frame Encoder and Decoder
-│   ├── can_pipeline.py                    # Standalone CAN Test & Replay Utility
-│   ├── dbc.py                             # DBC Parser Loader
-│   ├── engine_can.dbc                     # ISO 11898 CAN Message & Signal Definition
-│   ├── sample_engine_sensor_input.csv     # Sample Telemetry for CAN Validation
-│   ├── sensor_simulator.py                # Simulated ECU Sensor Transmitter
-│   └── README.md                          # Detailed CAN Subsystem Documentation
+│   ├── bus.py                              # python-can Bus Provider (Virtual / SocketCAN)
+│   ├── can_codec.py                        # DBC Frame Encoder and Decoder
+│   ├── can_pipeline.py                     # Standalone CAN Test & Replay Utility
+│   ├── dbc.py                              # DBC Parser Loader
+│   ├── engine_can.dbc                      # ISO 11898 CAN Message & Signal Definition
+│   ├── sample_engine_sensor_input.csv      # Sample Telemetry for CAN Validation
+│   ├── sensor_simulator.py                 # Simulated ECU Sensor Transmitter
+│   └── README.md                           # Detailed CAN Subsystem Documentation
 │
 ├── simulink/                               # Recorded Mission Simulink Telemetry Layer
 │   ├── simulink_udp_poc.slx                # UDP telemetry replay model
-│   ├── run_mission.m                        # Mission 1–100 selector and runner
-│   ├── udp_can_bridge.py                    # UDP telemetry to CAN-FD multicast bridge
-│   └── README.md                            # Simulink integration documentation
+│   ├── run_mission.m                       # Mission 1–100 selector and runner
+│   ├── udp_can_bridge.py                   # UDP telemetry to CAN-FD multicast bridge
+│   └── README.md                           # Simulink integration documentation
 │
 ├── data/                                   # Datasets & Flight Logs
 │   ├── MALE_UAV_aero_piston_engine_final_100k.csv  # 100k Multi-Mission Flight Dataset
-│   ├── demo_synthetic_flight_test.csv     # Out-of-Sample Mission 999 Test Set
-│   └── degradation_data/                  # Engine Degradation Calibration Logs
+│   ├── demo_synthetic_flight_test.csv      # Out-of-Sample Mission 999 Test Set
+│   └── degradation_data/                   # Engine Degradation Calibration Logs
 │
-├── explainability/                         # Explainable AI (XAI) Diagnostic Layer
+├── explainability/                          # Explainable AI (XAI) Diagnostic Layer
 │   ├── __init__.py
-│   ├── anomaly_explainer.py               # Counterfactual & Z-Score Anomaly Analyzer
-│   ├── confidence.py                      # Uncertainty & Confidence Metric Computations
-│   ├── feature_mapper.py                  # Sensor Grouping & Technical Name Mapper
-│   ├── shap_explainer.py                  # TreeSHAP for Fault, Degradation & RUL Models
-│   ├── xai_engine.py                      # Central Multi-Model XAI Orchestrator
-│   └── README.md                          # Comprehensive XAI Mathematical Reference
+│   ├── anomaly_explainer.py                # Counterfactual & Z-Score Anomaly Analyzer
+│   ├── confidence.py                       # Uncertainty & Confidence Metric Computations
+│   ├── feature_mapper.py                   # Sensor Grouping & Technical Name Mapper
+│   ├── shap_explainer.py                   # TreeSHAP for Fault, Degradation & RUL Models
+│   ├── xai_engine.py                       # Central Multi-Model XAI Orchestrator
+│   └── README.md                           # Comprehensive XAI Mathematical Reference
 │
 ├── models/                                 # Trained & Frozen AI/ML Model Artifacts
 │   ├── anomaly_detection/
-│   │   ├── isolation_forest_model.pkl     # Isolation Forest Estimator
-│   │   └── scaler.pkl                     # 13-Feature StandardScaler
+│   │   ├── anomaly_pca_model.pkl           # Production PCA reconstruction-error model (10 components, 51 features)
+│   │   └── scaler.pkl                      # StandardScaler for production anomaly features
 │   ├── degradation_detection/
-│   │   ├── xgb_degradation_model.json     # XGBoost Regressor (120 Features)
-│   │   ├── feature_columns.json           # Expected Feature Column Ordering
+│   │   ├── xgb_degradation_model.json      # XGBoost Regressor (120 Features)
+│   │   ├── feature_columns.json            # Expected Feature Column Ordering
 │   │   └── README.md
 │   ├── fault_detection/
 │   │   ├── fault_detection_multiclass_xgb.json # Multiclass XGBoost Classifier
 │   │   ├── fault_detection_label_encoder.pkl   # Fault Class LabelEncoder
 │   │   └── fault_detection_multiclass_feature_cols.json
 │   └── rul_prediction/
-│       ├── xgboost_rul_model.json         # XGBoost RUL Regressor (60 Features)
-│       └── xgboost_rul_features.txt       # RUL Feature Specification List
+│       ├── xgboost_rul_model.json          # XGBoost RUL Regressor (60 Features)
+│       └── xgboost_rul_features.txt        # RUL Feature Specification List
 │
 ├── services/                               # Five HTTP Microservices
 │   ├── api_gateway/
-│   │   └── main.py                        # Central Gateway, WebSocket Proxy (Port 8000)
+│   │   └── main.py                         # Central Gateway, WebSocket Proxy (Port 8000)
 │   ├── telemetry_service/
-│   │   └── main.py                        # Simulation & Telemetry Service (Port 8001)
+│   │   └── main.py                         # Simulation & Telemetry Service (Port 8001)
 │   ├── ml_inference_service/
-│   │   └── main.py                        # AI/ML Inference Microservice (Port 8002)
+│   │   └── main.py                         # AI/ML Inference Microservice (Port 8002)
 │   ├── xai_service/
-│   │   └── main.py                        # XAI & Maintenance Advisory Service (Port 8003)
+│   │   └── main.py                         # XAI & Maintenance Advisory Service (Port 8003)
 │   ├── mongodb_service/
-│   │   └── main.py                        # MongoDB Atlas Persistence Service (Port 8004)
-│   └── run_all_services.py                # Automated Multi-Service Supervisor & Process Manager
+│   │   └── main.py                         # MongoDB Atlas Persistence Service (Port 8004)
+│   └── run_all_services.py                 # Automated Multi-Service Supervisor & Process Manager
 │
 ├── .env.example                            # Local service and telemetry configuration template
-├── .gitignore                              # Git Ignore Configuration
-├── requirements.txt                        # Production Python Dependencies
-└── README.md                               # Master Project Documentation
+├── .gitignore                               # Git Ignore Configuration
+├── requirements.txt                         # Production Python Dependencies
+└── README.md                                # Master Project Documentation
 ```
 
 ---
@@ -525,7 +580,7 @@ SIH-26/
 
 ### 1. Prerequisites
 - **Python**: Version `3.10` or higher (tested on `3.10` and `3.11`).
-- **MongoDB Atlas**: An active MongoDB Atlas cluster URI (free tier M0 or higher).
+- **MongoDB Atlas (optional external backend)**: Configure a cluster URI when Atlas persistence is desired; the persistence service falls back to in-memory storage when Atlas is unavailable.
 - **Operating System**: Windows 10/11, Ubuntu 20.04+, or macOS.
 
 ### 2. Clone the Repository
@@ -552,7 +607,7 @@ pip install -r requirements.txt
 ```
 
 ### 5. Configure Environment Variables
-Copy `.env.example` to `.env` and configure your MongoDB Atlas connection string:
+Copy `.env.example` to `.env`. To enable the optional MongoDB Atlas external persistence backend, configure its connection string:
 ```bash
 # Windows (PowerShell)
 copy .env.example .env
@@ -599,6 +654,16 @@ npm run dev -- --host 127.0.0.1
 Then open [http://127.0.0.1:5173/](http://127.0.0.1:5173/) and use the
 dashboard to select a live mission and click `STREAM LIVE`.
 
+### Verified Docker Deployment
+
+The verified container deployment is started with:
+
+```bash
+docker compose up --build -d
+```
+
+It includes the API Gateway (`8000`), Frontend Dashboard (`3000`), Telemetry/Simulation (`8001`), ML Inference (`8002`), XAI/Advisory (`8003`), and MongoDB Persistence (`8004`) services. MongoDB persistence automatically falls back to in-memory storage when Atlas is unavailable.
+
 ### Single-Command Multi-Service Launcher
 
 The service launcher starts the five HTTP microservices concurrently with
@@ -611,7 +676,7 @@ automatic port conflict resolution:
 [LAUNCH] Launching Telemetry & Simulation Service on Port 8001...
 [LAUNCH] Launching AI/ML Inference Service on Port 8002...
 [LAUNCH] Launching XAI & Advisory Service on Port 8003...
-[LAUNCH] Launching MongoDB Atlas Persistence Service on Port 8004...
+[LAUNCH] Launching MongoDB Persistence Service on Port 8004...
 [LAUNCH] Launching API Gateway Service on Port 8000...
 ================================================================================
 ALL 5 MICROSERVICES ONLINE AND READY!
@@ -661,13 +726,13 @@ The API Gateway runs on **Port 8000** and serves as the unified interface for th
 | **Missions** | `GET` | `/api/missions` | — | List all available recorded mission IDs. |
 | **Simulation** | `POST` | `/api/simulation/load_mission` | `{"mission_id": 999}` | Loads mission dataset and resets filters. |
 | **Simulation** | `POST` | `/api/simulation/start` | — | Starts continuous real-time mission playback. |
-| **Simulation** | `POST` | `/api/simulation/pause` | — | Pauses mission playback. |
+| **Simulation** | `POST` | `/api/simulation/pause` | — | Stops mission playback and terminates the external Simulink process. |
 | **Simulation** | `POST` | `/api/simulation/step` | — | Steps simulation by 1 frame and returns full diagnostics. |
-| **Simulation** | `POST` | `/api/simulation/speed` | `{"speed": 2.0}` | Updates simulation speed multiplier ($0.1\times - 100\times$). |
+| **Simulation** | `POST` | `/api/simulation/speed` | `{"speed": 2.0}` | Updates simulation speed multiplier (0.1–100×). |
 | **Simulation** | `POST` | `/api/simulation/seek` | `{"frame_idx": 450}` | Jumps playback to specific mission frame. |
 | **Fault Injection** | `POST` | `/api/simulation/inject_fault` | `{"overrides": {"cht_C": 40.0}}` | Injects synthetic parameter perturbations. |
 | **Fault Injection** | `POST` | `/api/simulation/clear_faults` | — | Restores nominal sensor parameters. |
-| **MongoDB** | `GET` | `/api/db/saved_missions` | — | Returns list of mission IDs logged in Atlas. |
+| **MongoDB** | `GET` | `/api/db/saved_missions` | — | Returns list of mission IDs available from the persistence backend. |
 | **MongoDB** | `GET` | `/api/db/mission/{id}/replay` | — | Fetches complete recorded mission trajectory. |
 | **MongoDB** | `GET` | `/api/db/advisories` | `?mission_id=999` | Retrieves logged maintenance advisories. |
 | **MongoDB** | `GET` | `/api/db/fleet_metadata` | — | Retrieves UAV tail numbers & flight hours. |
@@ -675,7 +740,7 @@ The API Gateway runs on **Port 8000** and serves as the unified interface for th
 ### WebSocket Real-Time Stream
 
 - **URL**: `ws://localhost:8000/ws/telemetry`
-- **Streaming Rate**: Dynamically governed by `playback_speed` (Default: $1\,\text{Hz}$).
+- **Streaming Rate**: Dynamically governed by `playback_speed` (default: 1 Hz).
 
 #### WebSocket Frame Payload Schema
 ```json
@@ -713,9 +778,10 @@ The API Gateway runs on **Port 8000** and serves as the unified interface for th
     "fuel_air_ratio": 0.0622
   },
   "anomaly_detection": {
+    "anomaly_score": 19.382,
     "is_anomaly": false,
-    "anomaly_score": -0.142,
-    "decision_function": 0.142
+    "raw_anomaly": false,
+    "decision_function": -19.382
   },
   "degradation_estimation": {
     "degradation_index": 0.062,
@@ -781,7 +847,7 @@ curl -X POST http://localhost:8000/api/simulation/clear_faults
 
 ## 🛡️ Verification & Automated Testing
 
-An automated end-to-end verification script tests all 5 microservices, simulation streaming, fault injection, and MongoDB Atlas persistence:
+An automated end-to-end verification script tests all 5 microservices, simulation streaming, fault injection, and the persistence backend (MongoDB Atlas when available, otherwise in-memory fallback):
 
 ```bash
 # Ensure services are running, then execute:
@@ -791,27 +857,27 @@ python backend/verify_microservices.py
 ### Test Output
 ```text
 =================================================================
-STARTING FULL END-TO-END MICROSERVICES & MONGODB VERIFICATION
+STARTING FULL END-TO-END MICROSERVICES & PERSISTENCE VERIFICATION
 =================================================================
 Test 1: Checking All 5 Microservices Health Endpoints...
 [SUCCESS] Telemetry Service Online: HEALTHY
 [SUCCESS] ML Inference Service Online: True
 [SUCCESS] XAI Advisory Service Online: HEALTHY
-[SUCCESS] MongoDB Atlas Service Online: True
+[SUCCESS] MongoDB Persistence Service Online: True
 [SUCCESS] API Gateway Service Online: HEALTHY
 Test 2: Loading Out-of-Sample Demo Mission 999 via API Gateway...
 [SUCCESS] Load Mission Response: Successfully loaded Mission 999
-Test 3: Stepping simulation & logging frames to MongoDB Atlas...
-[SUCCESS] 10 Steps executed cleanly with automatic MongoDB Atlas frame logging!
-Test 4: Testing MongoDB Atlas Mission Replay API...
-[SUCCESS] Mission Replay Data Retrieved: 10 frames persisted in MongoDB Atlas!
+Test 3: Stepping simulation & logging frames to the persistence backend...
+[SUCCESS] 10 Steps executed cleanly with automatic persistence-backend frame logging!
+Test 4: Testing the persistence backend Mission Replay API...
+[SUCCESS] Mission Replay Data Retrieved: 10 frames persisted by the persistence backend!
 Test 5: Testing synthetic fault injection via Gateway...
 [SUCCESS] Fault Injection Health Status: FAULT DETECTED (OVERHEATING)
 [SUCCESS] Synthetic fault cleared successfully!
-Test 6: Checking MongoDB Atlas Advisory History Retrieval...
-[SUCCESS] Retrieved 10 advisories from MongoDB Atlas advisory_history collection!
+Test 6: Checking persistence backend advisory history retrieval...
+[SUCCESS] Retrieved 10 advisories from the persistence backend advisory history!
 =================================================================
-ALL 5 MICROSERVICES & MONGODB ATLAS END-TO-END TESTS PASSED CLEANLY!
+ALL 5 MICROSERVICES & PERSISTENCE-BACKEND END-TO-END TESTS PASSED CLEANLY!
 =================================================================
 ```
 
@@ -847,9 +913,9 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 Recorded Mission CSV
         ↓
 MATLAB / Simulink (1-second fixed step replay)
-        ↓ UDP telemetry (127.0.0.1:5005)
+        → UDP telemetry (127.0.0.1:5005)
 udp_can_bridge.py
-        ↓ CAN-FD multicast (channel: ff15:7079:7468:6f6e:6465:6d6f:6d63:6173, port: 43113)
+        → CAN-FD multicast (channel: ff15:7079:7468:6f6e:6465:6d6f:6d63:6173, port: 43113)
 CANInputReceiver (backend/can_receiver.py)
         ↓
 Existing Digital Twin Backend (backend/simulation_engine.py)
@@ -863,7 +929,7 @@ Remaining Useful Life (RUL) Prediction & Dynamic Anchoring
 XAI & Diagnostic Advisory Layer (explainability/xai_engine.py)
         ↓
 API Gateway Service (Port 8000)
-        ↓ WebSocket (ws://127.0.0.1:8000/ws/telemetry)
+        → WebSocket (ws://127.0.0.1:8000/ws/telemetry)
 Ground Control Station Live Dashboard (frontend/)
 ```
 
@@ -877,7 +943,7 @@ Ground Control Station Live Dashboard (frontend/)
 ### 1. Telemetry Generation & Solver Configuration
 - **Model Artifact**: [`simulink/simulink_udp_poc.slx`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/simulink_udp_poc.slx)
 - **Solver Settings**: Configured with a **Fixed-Step 1-second solver** (`Fixed-step size = 1 s`). This ensures exact 1:1 temporal alignment between original dataset CSV rows and emitted UDP telemetry frames, preventing inter-sample interpolation artifacts.
-- **Mission Selector**: [`simulink/run_mission.m`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/run_mission.m) accepts `mission_id` (`1`–`100`) and `stop_time` (default `1000` seconds), reading from mission CSV logs in `data/` and populating the `telemetry_ts` timeseries structure.
+- **Mission Selector**: [`simulink/run_mission.m`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/simulink/run_mission.m) accepts `mission_id` (`1`-`100`) and `stop_time` (default `1000` seconds), reading from mission CSV logs in `data/` and populating the `telemetry_ts` timeseries structure.
 
 ### 2. Live Replay vs. Historical Mission Scope
 - **Missions 1–100 (Live Replay Mode)**: Supported for real-time streaming through MATLAB/Simulink and the UDP→CAN-FD bridge.
@@ -885,9 +951,9 @@ Ground Control Station Live Dashboard (frontend/)
 
 ### 3. SimulinkController Process Management
 The [`backend/simulink_controller.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/backend/simulink_controller.py) module manages external MATLAB process lifecycles with decoupled mission selection and start/stop controls:
-- **`select_mission(mission_id)`**: Prepares Mission `1`–`100` and sets state to `PAUSED` without launching MATLAB. If a previous Simulink simulation is active, it automatically terminates it first.
+- **`select_mission(mission_id)`**: Prepares Mission `1`-`100` and sets state to `PAUSED` without launching MATLAB. If a previous Simulink simulation is active, it automatically terminates it first.
 - **`start()`**: Triggered by user action (`STREAM LIVE`). Spawns `matlab -batch "cd('...'); run_mission(id, stop_time)"` as an asynchronous subprocess.
-- **`stop()`**: Triggered by user action (`PAUSE` or `STOP`). Terminates the active MATLAB process via OS process termination (`taskkill /F` on Windows, `terminate()` on POSIX). Note that pause action terminates the process rather than freezing simulation time.
+- **`stop()`**: Triggered by the dashboard `STOP` control. Terminates the active MATLAB process via OS process termination (`taskkill /F` on Windows, `terminate()` on POSIX) rather than freezing simulation time.
 
 ---
 
@@ -917,12 +983,13 @@ The Remaining Useful Life (RUL) predictor combines XGBoost regression with physi
 
 1. **Historical Warm-Up Buffer**: Requires a 13-frame temporal window. During initial frames, status reports `COLLECTING_HISTORY` with `predicted_rul_hours = null`. Upon accumulating 13 frames, status transitions to `PREDICTED`.
 2. **Failure-State Physical Anchoring**:
-   - If wear index $\ge 0.98$, RUL is clamped to $0.0\,\text{hours}$.
+   - If wear index ≥ 0.98, RUL is clamped to 0.0 hours.
    - For intermediate wear, raw ML outputs are anchored against physical lifecycle targets:
-     $$\text{RUL}_{\text{target}} = \left(\frac{\text{Health}\%}{100}\right) \times 50.0\,\text{hrs}$$
-     $$\text{RUL}_{\text{anchored}} = 0.3 \times \text{RUL}_{\text{raw}} + 0.7 \times \text{RUL}_{\text{target}}$$
-3. **Monotonic Filtering & Slew-Rate Limits**: Low-pass Exponential Moving Average ($\alpha = 0.12$) and slew-rate caps ($+0.5\,\text{h}$ max climb, $-2.0\,\text{h}$ max descent per tick) remove transient noise and enforce monotonic behavior.
-4. **Uncertainty Bounds ($P_{10} - P_{90}$ 90% CI)**: Evaluates predictions across 10 boosting sub-ensemble checkpoints to calculate prediction variance $\sigma$, rendering lower ($P_{10}$) and upper ($P_{90}$) confidence limits.
+     Target RUL = (Health % / 100) × 50.0 hours
+
+     Anchored RUL = 0.3 × raw RUL + 0.7 × target RUL
+3. **Monotonic Filtering & Slew-Rate Limits**: Low-pass Exponential Moving Average (α = 0.12) and slew-rate caps (+0.5 h max climb, −2.0 h max descent per tick) remove transient noise and enforce monotonic behavior.
+4. **Uncertainty Bounds (P10–P90, 90% CI)**: Evaluates predictions across 10 boosting sub-ensemble checkpoints to calculate prediction variance σ, rendering lower (P10) and upper (P90) confidence limits.
 
 ---
 
@@ -943,7 +1010,7 @@ All model metrics documented below reflect actual, empirical evaluation evidence
 
 ### 2. Model 1: Anomaly Detection (PCA Reconstruction Error)
 
-- **Algorithm**: PCA Reconstruction Error (10 principal components across 51 features, 95th percentile anomaly threshold = `19.528`). Baseline Isolation Forest model artifact ([`models/anomaly_detection/isolation_forest_model.pkl`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/isolation_forest_model.pkl)) is also preserved.
+- **Production algorithm**: PCA Reconstruction Error (10 principal components across 51 features, 95th percentile anomaly threshold = `19.528`), using [`models/anomaly_detection/anomaly_pca_model.pkl`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/anomaly_pca_model.pkl) with [`models/anomaly_detection/scaler.pkl`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/scaler.pkl). Any preserved Isolation Forest artifact is legacy/baseline only and is not used by production inference.
 - **Evaluation Source**: [`models/anomaly_detection/anomaly_detection_manifest.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/anomaly_detection/anomaly_detection_manifest.json)
 - **Evaluation Scope**: 100,000 telemetry samples across 100 missions (7 fault-injected evaluation missions).
 
@@ -1022,7 +1089,7 @@ All model metrics documented below reflect actual, empirical evaluation evidence
 
 ### 5. Model 4: Remaining Useful Life (RUL) Prediction (XGBoost Regressor)
 
-- **Algorithm**: XGBoost Regressor (60 features) + Dynamic Physical Anchoring + EMA Smoothing ($\alpha=0.12$) + Sub-Ensemble Variance ($P_{10}-P_{90}$ 90% CI).
+- **Algorithm**: XGBoost Regressor (60 features) + Dynamic Physical Anchoring + EMA Smoothing (α = 0.12) + Sub-Ensemble Variance (P10–P90, 90% CI).
 - **Evaluation Source**: [`docs/rul_evaluation_report.json`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/docs/rul_evaluation_report.json) & [`models/rul_prediction/inference/evaluate_rul_metrics.py`](file:///c:/Users/User/OneDrive/Desktop/Projects/SIH/SIH-26/models/rul_prediction/inference/evaluate_rul_metrics.py)
 - **Evaluation Scope**: 24,435 out-of-sample test samples.
 
@@ -1036,15 +1103,15 @@ All model metrics documented below reflect actual, empirical evaluation evidence
 | **MAPE (%)** | — | `52.04%` | Non-zero true RUL (>1h) |
 | **Mean Error (Hours)** | — | `4.48h` | Prediction bias |
 | **Median (P50) Error** | — | `4.64h` | Median error |
-| **P25 / P75 Error Bounds** | — | `-14.34h` / `+20.28h` | Interquartile error spread |
+| **P25 / P75 Error Bounds** | — | `−14.34h` / `+20.28h` | Interquartile error spread |
 
 #### RUL Accuracy by Lifecycle Phase
 
 | Lifecycle Phase | Flight Hours Scope | MAE (Hours) | RMSE (Hours) | R² Score | Test Samples |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Early Life** | $> 200\,\text{hours}$ | `50.05h` | `57.41h` | `-2.3699` | 2,933 |
-| **Mid Life** | $50 - 200\,\text{hours}$ | `27.44h` | `37.65h` | `0.2041` | 14,579 |
-| **Late Life (Critical)** | $< 50\,\text{hours}$ | `15.33h` | `22.79h` | `-1.4777` | 6,923 |
+| **Early Life** | > 200 hours | `50.05h` | `57.41h` | `-2.3699` | 2,933 |
+| **Mid Life** | 50–200 hours | `27.44h` | `37.65h` | `0.2041` | 14,579 |
+| **Late Life (Critical)** | < 50 hours | `15.33h` | `22.79h` | `-1.4777` | 6,923 |
 
 #### RUL Accuracy by Fault / Degradation Mode
 
@@ -1065,7 +1132,7 @@ All model metrics documented below reflect actual, empirical evaluation evidence
 
 | Model Component | Artifact Size | Input Shape | CPU Latency (ms/sample) | Target Allocation |
 | :--- | :---: | :---: | :---: | :--- |
-| **1. Anomaly Detection (Isolation Forest)** | `5,739.6 KB` | 13 | `41.679 ms` | Ground Control Station (GCS) |
+| **1. Anomaly Detection (legacy/baseline Isolation Forest)** | `5,739.6 KB` | 13 | `41.679 ms` | Legacy benchmark; not the production PCA detector |
 | **2. Degradation Estimation (XGBoost)** | `9,362.5 KB` | 120 | `1.922 ms` | Onboard Edge Flight Computer (<2ms) |
 | **3. Fault Classification (XGBoost)** | `1,707.7 KB` | 55 | `9.134 ms` | Ground Control Station (GCS) |
 | **4. RUL Prediction (XGBoost)** | `9,010.8 KB` | 60 | `10.875 ms` | Ground Control Station (GCS) |

@@ -17,6 +17,7 @@ from backend.config import (
     FAULT_FEATURE_COLS_PATH,
     RUL_MODEL_PATH,
     RUL_FEATURE_COLS_PATH,
+    ANOMALY_THRESHOLD,
 )
 
 logger = logging.getLogger("DigitalTwinModelManager")
@@ -24,7 +25,7 @@ logger = logging.getLogger("DigitalTwinModelManager")
 class DigitalTwinModelManager:
     """
     Unified Manager for loading, managing, and performing inference on all 4 Digital Twin AI/ML models:
-    1. Anomaly Detection (Isolation Forest + Scaler)
+    1. Anomaly Detection (PCA reconstruction error + Scaler)
     2. Degradation Estimation (XGBoost Regressor)
     3. Fault Classification (Multiclass XGBoost Classifier + Label Encoder)
     4. Remaining Useful Life (RUL) Prediction with Uncertainty Quantification & Smooth Dynamic Temporal Filtering
@@ -365,7 +366,7 @@ class DigitalTwinModelManager:
             "confidence_level": confidence_level
         }
 
-    def predict_all(self, feature_vectors: dict, anomaly_threshold: float = 0.0, buffer_len: int = 0) -> dict:
+    def predict_all(self, feature_vectors: dict, anomaly_threshold: float = ANOMALY_THRESHOLD, buffer_len: int = 0) -> dict:
         """
         Evaluates all 4 models in a single call given model feature vectors.
         """

@@ -10,6 +10,8 @@ import {
   Compass,
 } from 'lucide-react';
 
+const ANOMALY_THRESHOLD = 19.528;
+
 export const DiagnosticsPanel: React.FC = () => {
   const { currentFrame } = useDigitalTwinStore();
 
@@ -244,7 +246,7 @@ export const DiagnosticsPanel: React.FC = () => {
               />
               Anomaly Detection
             </span>
-            <span className="text-[10px] font-mono text-slate-500">Isolation Forest</span>
+            <span className="text-[10px] font-mono text-slate-500">PCA RECONSTRUCTION</span>
           </div>
 
           <div className="my-2">
@@ -261,7 +263,7 @@ export const DiagnosticsPanel: React.FC = () => {
             <div className="grid grid-cols-2 gap-2 mt-2 pt-1 font-mono text-[11px]">
               <div>
                 <span className="text-slate-500 text-[10px] block">ANOMALY SCORE</span>
-                <span className={`font-semibold ${anomaly.anomaly_score > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                <span className={`font-semibold ${anomaly.anomaly_score >= ANOMALY_THRESHOLD ? 'text-red-400' : 'text-emerald-400'}`}>
                   {anomaly.anomaly_score.toFixed(3)}
                 </span>
               </div>
@@ -273,7 +275,7 @@ export const DiagnosticsPanel: React.FC = () => {
           </div>
 
           <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-800/80">
-            Threshold: 0.000 | Multi-sensor vector
+            Threshold: {ANOMALY_THRESHOLD.toFixed(3)} | PCA reconstruction error
           </div>
         </div>
 

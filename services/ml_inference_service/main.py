@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from backend.security import verify_internal_key
 from backend.model_loader import DigitalTwinModelManager
+from backend.config import ANOMALY_THRESHOLD
 
 from contextlib import asynccontextmanager
 
@@ -39,7 +40,7 @@ app = FastAPI(
 
 class FeatureVectorsPayload(BaseModel):
     feature_vectors: Dict[str, Any]
-    anomaly_threshold: Optional[float] = 0.0
+    anomaly_threshold: Optional[float] = ANOMALY_THRESHOLD
     buffer_len: Optional[int] = 13
 
 @app.get("/health")
