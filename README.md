@@ -333,7 +333,7 @@ All machine learning models operate as **frozen inference engines** to ensure ze
 
 | Subsystem / Model | Algorithm & Architecture | Key Evaluated Performance Metrics | Features & Input | Operational Role |
 | **Model 1: Anomaly Detection** | **Unsupervised PCA / Reconstruction Error** | • **ROC-AUC**: `0.9943 (99.4%)`<br>• **Recall**: `98.21 %`<br>• **Precision**: `85.90 %`<br>• **Latency**: `2.4 timesteps` | 51 features, 10 components | Early detection of sub-threshold thermodynamic drift before critical thresholds. |
-| **Model 2: Degradation Estimation** | **XGBoost Regressor (Wear Index)** | • **Test MAE**: `0.00141`<br>• **Test RMSE**: `0.00525`<br>• **R² Score**: `0.99963`<br>• **Max Delta**: `< 1e-15` | 119 features | Continuous engine health degradation tracking from `100% → 0%` wear index. |
+| **Model 2: Degradation Estimation** | **XGBoost Regressor (Wear Index)** | • **Test MAE**: `0.00141`<br>• **Test RMSE**: `0.00525`<br>• **R² Score**: `0.9033`<br>• **Max Delta**: `< 1e-15` | 119 features | Continuous engine health degradation tracking from `100% → 0%` wear index. |
 | **Model 3: Multiclass Fault Classifier** | **Multiclass XGBoost Classifier** | • **Accuracy**: `99.95 %`<br>• **Macro F1**: `0.9990`<br>• **Macro ROC-AUC (OvR)**: `1.0000`<br>• **Lubrication F1**: `1.0000`<br>• **Injector F1**: `0.9985` | 55 features | Deterministic root-cause fault diagnosis across 6 discrete failure modes. |
 | **Model 4: Prognostic RUL Predictor** | **XGBoost Regressor + Anchoring Filter** | • **Overall MAE**: `26.72 Hours`<br>• **Late-Life Critical MAE (<50h)**: `15.33 Hours`<br>• **R² Score**: `0.7369`<br>• **RMSE**: `37.26 Hours` | 130 features | Continuous Remaining Useful Life estimation with 90% confidence intervals. |
 
